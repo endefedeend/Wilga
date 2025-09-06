@@ -95,7 +95,6 @@ begin
   koloryLinii[1] := COLOR_YELLOW;
   koloryLinii[2] := COLOR_YELLOW;
   
-  BeginDrawing;
   ClearBackground(COLOR_BLACK);
   
   pozycje[0].x := sX - 100; pozycje[0].y := sY + 50;
@@ -140,7 +139,6 @@ begin
   DrawText('Nacisnij ESC aby wyjsc', 10, 10, 20, COLOR_WHITE);
   DrawText('Koniczyna: ' + IntToStr(koniczynaIndex + 1) + '/3', 10, 40, 16, COLOR_LIGHTGRAY);
   
-  EndDrawing;
 end;
 
 begin
