@@ -1,4 +1,4 @@
-![](images/wilga.png)
+![](wilga/images/wilga.png)
 
 # Wilga – Gry na wysokim pułapie
 
