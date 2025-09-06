@@ -229,12 +229,10 @@ end;
 
 procedure Draw(const dt: Double);
 begin
-  BeginDrawing;
   ClearBackground(KOLOR_TLA);
   RysujKalejdoskop;
   DrawText('Nacisnij SPACJE aby potrzasnac', 20, 20, 20, COLOR_WHITE());
   DrawFPS(20, 50, COLOR_WHITE());
-  EndDrawing;
 end;
 
 begin
