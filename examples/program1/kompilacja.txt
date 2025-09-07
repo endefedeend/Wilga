@@ -1,0 +1,1 @@
+pas2js -Jc -Jirtl.js -Tbrowser kalejdoskop.pas
