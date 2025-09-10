@@ -32,6 +32,7 @@ TNoArgProc = procedure;
 
   TInputVector = record
     x, y: Double;
+        constructor Create(x, y: Double); inline;
     function Add(const v: TInputVector): TInputVector;
     function Subtract(const v: TInputVector): TInputVector;
     function Scale(s: Double): TInputVector;
@@ -78,6 +79,11 @@ TNoArgProc = procedure;
 
   TRectangle = record
     x, y, width, height: Double;
+
+    // === DODAJ TE LINIE ===
+    constructor Create(x, y, w, h: Double); inline;
+    class function FromCenter(cx, cy, w, h: Double): TRectangle; static; inline;
+
     function Move(dx, dy: Double): TRectangle;
     function Scale(sx, sy: Double): TRectangle;
     function Inflate(dx, dy: Double): TRectangle;
@@ -85,6 +91,7 @@ TNoArgProc = procedure;
     function Intersects(const other: TRectangle): Boolean;
     function GetCenter: TInputVector;
   end;
+
 
   TTexture = record
     canvas: TJSHTMLCanvasElement;
@@ -164,6 +171,19 @@ procedure DrawLineV(startPos, endPos: TInputVector; const color: TColor; thickne
 procedure DrawTriangle(const tri: TTriangle; const color: TColor; filled: Boolean = True);
 procedure DrawTriangleLines(const tri: TTriangle; const color: TColor; thickness: Integer = 1);
 procedure DrawRectangleLines(x, y, w, h: Integer; const color: TColor; thickness: Integer = 1);
+procedure DrawSquare(x, y, size: Integer; const color: TColor);
+procedure DrawSquareLines(x, y, size: Integer; const color: TColor; thickness: Integer = 1);
+procedure DrawSquareFromCenter(cx, cy, size: Integer; const color: TColor);
+procedure DrawSquareFromCenterLines(cx, cy, size: Integer; const color: TColor; thickness: Integer = 1);
+
+// Obrys zaokrąglonego prostokąta z kontrolą grubości
+procedure DrawRectangleRoundedStroke(x, y, w, h, radius: Integer; const color: TColor; thickness: Integer = 1);
+procedure DrawRectangleRoundedRecStroke(const rec: TRectangle; radius: Double; const color: TColor; thickness: Integer = 1);
+
+// Batch obrysów prostokątów
+procedure BeginRectStrokeBatch(const color: TColor; thickness: Integer = 1);
+procedure BatchRectStroke(x, y, w, h: Integer);
+procedure EndRectStrokeBatch;
 
 // Batch rysowania prostokątów
 procedure BeginRectBatch(const color: TColor);
@@ -312,6 +332,10 @@ procedure DrawRectangleRec(const rec: TRectangle; const color: TColor);
 procedure DrawCircle(cx, cy, radius: Integer; const color: TColor);
 procedure DrawCircleV(center: TInputVector; radius: Integer; const color: TColor);
 procedure DrawCircleLines(cx, cy, radius, thickness: Integer; const color: TColor);
+
+procedure DrawTextWithFont(const text: String; x, y, size: Integer; const family: String; const color: TColor);
+function  MeasureTextWidthWithFont(const text: String; size: Integer; const family: String): Double;
+function  MeasureTextHeightWithFont(const text: String; size: Integer; const family: String): Double;
 procedure DrawText(const text: String; x, y, size: Integer; const color: TColor);
 function  MeasureTextWidth(const text: String; size: Integer): Double;
 function  MeasureTextHeight(const text: String; size: Integer): Double;
@@ -435,26 +459,158 @@ procedure Run(UpdateProc: TDeltaProc);
 procedure Run(UpdateProc: TDeltaProc; DrawProc: TDeltaProc);
 
 { ====== KOLORY ====== }
-function COLOR_WHITE: TColor;
-function COLOR_BLACK: TColor;
-function COLOR_RED: TColor;
-function COLOR_GREEN: TColor;
-function COLOR_BLUE: TColor;
-function COLOR_TRANSPARENT: TColor;
-function COLOR_LIGHTGRAY: TColor;
-function COLOR_GRAY: TColor;
-function COLOR_DARKGRAY: TColor;
-function COLOR_YELLOW: TColor;
-function COLOR_GOLD: TColor;
-function COLOR_ORANGE: TColor;
-function COLOR_PINK: TColor;
-function COLOR_MAROON: TColor;
-function COLOR_PURPLE: TColor;
-function COLOR_VIOLET: TColor;
-function COLOR_BROWN: TColor;
+{ ====== Deklaracje kolorów ====== }
+function COLOR_ALICEBLUE: TColor;
+function COLOR_ANTIQUEWHITE: TColor;
+function COLOR_AQUA: TColor;
+function COLOR_AQUAMARINE: TColor;
+function COLOR_AZURE: TColor;
 function COLOR_BEIGE: TColor;
-function COLOR_MAGENTA: TColor;
+function COLOR_BISQUE: TColor;
+function COLOR_BLACK: TColor;
+function COLOR_BLANCHEDALMOND: TColor;
+function COLOR_BLUE: TColor;
+function COLOR_BLUEVIOLET: TColor;
+function COLOR_BROWN: TColor;
+function COLOR_BURLYWOOD: TColor;
+function COLOR_CADETBLUE: TColor;
+function COLOR_CHARTREUSE: TColor;
+function COLOR_CHOCOLATE: TColor;
+function COLOR_CORAL: TColor;
+function COLOR_CORNFLOWERBLUE: TColor;
+function COLOR_CORNSILK: TColor;
+function COLOR_CRIMSON: TColor;
 function COLOR_CYAN: TColor;
+function COLOR_DARKBLUE: TColor;
+function COLOR_DARKCYAN: TColor;
+function COLOR_DARKGOLDENROD: TColor;
+function COLOR_DARKGRAY: TColor;
+function COLOR_DARKGREY: TColor;
+function COLOR_DARKGREEN: TColor;
+function COLOR_DARKKHAKI: TColor;
+function COLOR_DARKMAGENTA: TColor;
+function COLOR_DARKOLIVEGREEN: TColor;
+function COLOR_DARKORANGE: TColor;
+function COLOR_DARKORCHID: TColor;
+function COLOR_DARKRED: TColor;
+function COLOR_DARKSALMON: TColor;
+function COLOR_DARKSEAGREEN: TColor;
+function COLOR_DARKSLATEBLUE: TColor;
+function COLOR_DARKSLATEGRAY: TColor;
+function COLOR_DARKSLATEGREY: TColor;
+function COLOR_DARKTURQUOISE: TColor;
+function COLOR_DARKVIOLET: TColor;
+function COLOR_DEEPPINK: TColor;
+function COLOR_DEEPSKYBLUE: TColor;
+function COLOR_DIMGRAY: TColor;
+function COLOR_DIMGREY: TColor;
+function COLOR_DODGERBLUE: TColor;
+function COLOR_FIREBRICK: TColor;
+function COLOR_FLORALWHITE: TColor;
+function COLOR_FORESTGREEN: TColor;
+function COLOR_FUCHSIA: TColor;
+function COLOR_GAINSBORO: TColor;
+function COLOR_GHOSTWHITE: TColor;
+function COLOR_GOLD: TColor;
+function COLOR_GOLDENROD: TColor;
+function COLOR_GRAY: TColor;
+function COLOR_GREY: TColor;
+function COLOR_GREEN: TColor;
+function COLOR_GREENYELLOW: TColor;
+function COLOR_HONEYDEW: TColor;
+function COLOR_HOTPINK: TColor;
+function COLOR_INDIANRED: TColor;
+function COLOR_INDIGO: TColor;
+function COLOR_IVORY: TColor;
+function COLOR_KHAKI: TColor;
+function COLOR_LAVENDER: TColor;
+function COLOR_LAVENDERBLUSH: TColor;
+function COLOR_LAWNGREEN: TColor;
+function COLOR_LEMONCHIFFON: TColor;
+function COLOR_LIGHTBLUE: TColor;
+function COLOR_LIGHTCORAL: TColor;
+function COLOR_LIGHTCYAN: TColor;
+function COLOR_LIGHTGOLDENRODYELLOW: TColor;
+function COLOR_LIGHTGRAY: TColor;
+function COLOR_LIGHTGREY: TColor;
+function COLOR_LIGHTGREEN: TColor;
+function COLOR_LIGHTPINK: TColor;
+function COLOR_LIGHTSALMON: TColor;
+function COLOR_LIGHTSEAGREEN: TColor;
+function COLOR_LIGHTSKYBLUE: TColor;
+function COLOR_LIGHTSLATEGRAY: TColor;
+function COLOR_LIGHTSLATEGREY: TColor;
+function COLOR_LIGHTSTEELBLUE: TColor;
+function COLOR_LIGHTYELLOW: TColor;
+function COLOR_LIME: TColor;
+function COLOR_LIMEGREEN: TColor;
+function COLOR_LINEN: TColor;
+function COLOR_MAGENTA: TColor;
+function COLOR_MAROON: TColor;
+function COLOR_MEDIUMAQUAMARINE: TColor;
+function COLOR_MEDIUMBLUE: TColor;
+function COLOR_MEDIUMORCHID: TColor;
+function COLOR_MEDIUMPURPLE: TColor;
+function COLOR_MEDIUMSEAGREEN: TColor;
+function COLOR_MEDIUMSLATEBLUE: TColor;
+function COLOR_MEDIUMSPRINGGREEN: TColor;
+function COLOR_MEDIUMTURQUOISE: TColor;
+function COLOR_MEDIUMVIOLETRED: TColor;
+function COLOR_MIDNIGHTBLUE: TColor;
+function COLOR_MINTCREAM: TColor;
+function COLOR_MISTYROSE: TColor;
+function COLOR_MOCCASIN: TColor;
+function COLOR_NAVAJOWHITE: TColor;
+function COLOR_NAVY: TColor;
+function COLOR_OLDLACE: TColor;
+function COLOR_OLIVE: TColor;
+function COLOR_OLIVEDRAB: TColor;
+function COLOR_ORANGE: TColor;
+function COLOR_ORANGERED: TColor;
+function COLOR_ORCHID: TColor;
+function COLOR_PALEGOLDENROD: TColor;
+function COLOR_PALEGREEN: TColor;
+function COLOR_PALETURQUOISE: TColor;
+function COLOR_PALEVIOLETRED: TColor;
+function COLOR_PAPAYAWHIP: TColor;
+function COLOR_PEACHPUFF: TColor;
+function COLOR_PERU: TColor;
+function COLOR_PINK: TColor;
+function COLOR_PLUM: TColor;
+function COLOR_POWDERBLUE: TColor;
+function COLOR_PURPLE: TColor;
+function COLOR_REBECCAPURPLE: TColor;
+function COLOR_RED: TColor;
+function COLOR_ROSYBROWN: TColor;
+function COLOR_ROYALBLUE: TColor;
+function COLOR_SADDLEBROWN: TColor;
+function COLOR_SALMON: TColor;
+function COLOR_SANDYBROWN: TColor;
+function COLOR_SEAGREEN: TColor;
+function COLOR_SEASHELL: TColor;
+function COLOR_SIENNA: TColor;
+function COLOR_SILVER: TColor;
+function COLOR_SKYBLUE: TColor;
+function COLOR_SLATEBLUE: TColor;
+function COLOR_SLATEGRAY: TColor;
+function COLOR_SLATEGREY: TColor;
+function COLOR_SNOW: TColor;
+function COLOR_SPRINGGREEN: TColor;
+function COLOR_STEELBLUE: TColor;
+function COLOR_TAN: TColor;
+function COLOR_TEAL: TColor;
+function COLOR_THISTLE: TColor;
+function COLOR_TOMATO: TColor;
+function COLOR_TURQUOISE: TColor;
+function COLOR_VIOLET: TColor;
+function COLOR_WHEAT: TColor;
+function COLOR_WHITE: TColor;
+function COLOR_WHITESMOKE: TColor;
+function COLOR_YELLOW: TColor;
+function COLOR_YELLOWGREEN: TColor;
+
+
+
 
   {$ifdef WILGA_DEBUG}
 function DumpLeakReport: String;
@@ -565,6 +721,8 @@ const
   KEY_NUMPAD_MULTIPLY = 'NumpadMultiply';
   KEY_NUMPAD_DIVIDE   = 'NumpadDivide';
   KEY_NUMPAD_DECIMAL  = 'NumpadDecimal';
+// === DODAJ TO W INTERFACE (poza rekordem) ===
+function TRectangleCreate(x, y, w, h: Double): TRectangle; inline;
 
 implementation
 
@@ -612,7 +770,7 @@ var
   gCurrentFps: LongInt = 0;
 
   // Zamknięcie okna
-  gWantsClose: Boolean = true;  
+  gWantsClose: Boolean = false;  
 
     gCloseOnEscape: Boolean = false; 
 
@@ -972,6 +1130,32 @@ begin
     Result := COLOR_BLACK;
   end;
 end;
+{ ==== TRectangle helpers ===================================================== }
+
+constructor TRectangle.Create(x, y, w, h: Double);
+begin
+  Self.x := x; Self.y := y; Self.width := w; Self.height := h;
+end;
+
+class function TRectangle.FromCenter(cx, cy, w, h: Double): TRectangle;
+begin
+  Result.x := cx - w * 0.5;
+  Result.y := cy - h * 0.5;
+  Result.width := w;
+  Result.height := h;
+end;
+
+function TRectangleCreate(x, y, w, h: Double): TRectangle;
+begin
+  Result := TRectangle.Create(x, y, w, h);
+end;
+
+{ ==== TInputVector helpers (opcjonalnie) ==================================== }
+
+constructor TInputVector.Create(x, y: Double);
+begin
+  Self.x := x; Self.y := y;
+end;
 
 function RandomColor(minBrightness: Integer = 0; maxBrightness: Integer = 255): TColor;
 begin
@@ -1186,9 +1370,9 @@ function GetTime: Double; begin Result := (window.performance.now() - gStartTime
 { ====== RYSOWANIE KSZTAŁTÓW ====== }
 procedure DrawLine(startX, startY, endX, endY: Integer; const color: TColor; thickness: Integer = 1);
 var off: Double;
+
 begin
-  off := 0.0;
-  if thickness = 1 then off := 0.5; // ostre 1px
+  if (thickness and 1) = 1 then off := 0.5 else off := 0.0;
   gCtx.beginPath;
   gCtx.lineWidth := thickness;
   gCtx.strokeStyle := ColorToCanvasRGBA(color);
@@ -1196,6 +1380,7 @@ begin
   gCtx.lineTo(endX   + off, endY   + off);
   gCtx.stroke;
 end;
+
 
 procedure DrawLineV(startPos, endPos: TInputVector; const color: TColor; thickness: Integer = 1);
 begin
@@ -1371,7 +1556,8 @@ end;
 procedure DrawTextOutline(const text: String; x, y, size: Integer; const fillColor, outlineColor: TColor; outlinePx: Integer);
 begin
   gCtx.save;
-  gCtx.font := IntToStr(size) + 'px Arial, Helvetica, sans-serif';
+  if gCtx.font = '' then
+  gCtx.font := IntToStr(size) + 'px system-ui, sans-serif';
   gCtx.textAlign := 'left';
   gCtx.textBaseline := 'top';
 
@@ -1455,13 +1641,12 @@ begin
                       Round(radius), color, filled);
 end;
 procedure DrawRectangleLines(x, y, w, h: Integer; const color: TColor; thickness: Integer = 1);
+var off: Double;
 begin
   gCtx.lineWidth := thickness;
   gCtx.strokeStyle := ColorToCanvasRGBA(color);
-  if thickness = 1 then
-    gCtx.strokeRect(x+0.5, y+0.5, w, h)
-  else
-    gCtx.strokeRect(x, y, w, h);
+  if (thickness and 1) = 1 then off := 0.5 else off := 0.0;
+  gCtx.strokeRect(x + off, y + off, w, h);
 end;
 
 { ====== TRANSFORMACJE I MACIERZE ====== }
@@ -2894,6 +3079,7 @@ begin
   // Reset key pressed/released states (frame-based)
   gKeysPressed := TJSObject.new;
   gKeysReleased := TJSObject.new;
+  gMouseWheelDelta := 0;
 end;
 
 procedure ClearBackground(const color: TColor);
@@ -2971,7 +3157,8 @@ end;
 procedure DrawText(const text: String; x, y, size: Integer; const color: TColor);
 begin
   gCtx.fillStyle := ColorToCanvasRGBA(color);
-  gCtx.font := IntToStr(size) + 'px Arial, Helvetica, sans-serif';
+  if gCtx.font = '' then
+  gCtx.font := IntToStr(size) + 'px system-ui, sans-serif';
   gCtx.textBaseline := 'top';
   gCtx.fillText(text, x, y);
 end;
@@ -2979,7 +3166,8 @@ end;
 function MeasureTextWidth(const text: String; size: Integer): Double;
 begin
   gCtx.save;
-  gCtx.font := IntToStr(size) + 'px Arial, Helvetica, sans-serif';
+  if gCtx.font = '' then
+  gCtx.font := IntToStr(size) + 'px system-ui, sans-serif';
   Result := gCtx.measureText(text).width;
   gCtx.restore;
 end;
@@ -2988,7 +3176,8 @@ function MeasureTextHeight(const text: String; size: Integer): Double;
 var m: TJSObject;
 begin
   gCtx.save;
-  gCtx.font := IntToStr(size) + 'px Arial, Helvetica, sans-serif';
+  if gCtx.font = '' then
+  gCtx.font := IntToStr(size) + 'px system-ui, sans-serif';
   m := TJSObject(gCtx.measureText(text));
   if m.hasOwnProperty('actualBoundingBoxAscent') and m.hasOwnProperty('actualBoundingBoxDescent') then
     Result := Double(m['actualBoundingBoxAscent']) + Double(m['actualBoundingBoxDescent'])
@@ -3012,7 +3201,8 @@ procedure DrawTextCentered(const text: String; cx, cy, size: Integer; const colo
 begin
   gCtx.save;
   gCtx.fillStyle := ColorToCanvasRGBA(color);
-  gCtx.font := IntToStr(size) + 'px Arial, Helvetica, sans-serif';
+  if gCtx.font = '' then
+  gCtx.font := IntToStr(size) + 'px system-ui, sans-serif';
   gCtx.textAlign := 'center';
   gCtx.textBaseline := 'middle';
   gCtx.fillText(text, cx, cy);
@@ -3039,13 +3229,55 @@ begin
   gCtx.translate(x + originX, y + originY);
   gCtx.rotate(rotation);
   gCtx.fillStyle := ColorToCanvasRGBA(color);
-  gCtx.font := IntToStr(size) + 'px Arial, Helvetica, sans-serif';
+  if gCtx.font = '' then
+  gCtx.font := IntToStr(size) + 'px system-ui, sans-serif';
   gCtx.textAlign := 'left';
   gCtx.textBaseline := 'top';
   gCtx.fillText(text, -originX, -originY);
   gCtx.restore;
 end;
 
+
+// === Text helpers with explicit font ===
+procedure DrawTextWithFont(const text: String; x, y, size: Integer; const family: String; const color: TColor);
+begin
+  gCtx.save;
+  if family <> '' then
+    gCtx.font := IntToStr(size) + 'px "' + family + '", system-ui, sans-serif'
+  else if gCtx.font = '' then
+    gCtx.font := IntToStr(size) + 'px system-ui, sans-serif';
+  gCtx.fillStyle := ColorToCanvasRGBA(color);
+  gCtx.textBaseline := 'top';
+  gCtx.fillText(text, x, y);
+  gCtx.restore;
+end;
+
+function MeasureTextWidthWithFont(const text: String; size: Integer; const family: String): Double;
+begin
+  gCtx.save;
+  if family <> '' then
+    gCtx.font := IntToStr(size) + 'px "' + family + '", system-ui, sans-serif'
+  else if gCtx.font = '' then
+    gCtx.font := IntToStr(size) + 'px system-ui, sans-serif';
+  Result := gCtx.measureText(text).width;
+  gCtx.restore;
+end;
+
+function MeasureTextHeightWithFont(const text: String; size: Integer; const family: String): Double;
+var m: TJSObject;
+begin
+  gCtx.save;
+  if family <> '' then
+    gCtx.font := IntToStr(size) + 'px "' + family + '", system-ui, sans-serif'
+  else if gCtx.font = '' then
+    gCtx.font := IntToStr(size) + 'px system-ui, sans-serif';
+  m := TJSObject(gCtx.measureText(text));
+  if m.hasOwnProperty('actualBoundingBoxAscent') and m.hasOwnProperty('actualBoundingBoxDescent') then
+    Result := Double(m['actualBoundingBoxAscent']) + Double(m['actualBoundingBoxDescent'])
+  else
+    Result := size; // fallback
+  gCtx.restore;
+end;
 { ====== RYSOWANIE ROZSZERZONE ====== }
 procedure DrawRectangleProDeg(const rec: TRectangle; origin: TVector2; rotationDeg: Double; const color: TColor);
 begin
@@ -3464,7 +3696,7 @@ begin
   // jeśli ktoś zatrzymał pętlę z zewnątrz – wyjdź
   if not gRunning then Exit;
 
-  // [NOWE] żądanie zamknięcia (np. ESC w onKeyDownH)
+  // żądanie zamknięcia (np. ESC w onKeyDownH)
   if gWantsClose then
   begin
     gRunning := False;
@@ -3489,13 +3721,25 @@ begin
     end;
   end;
 
-  gLastTime := time;
-  if elapsedMs > 100.0 then elapsedMs := 100.0; // zabezpieczenie po pauzie
-  gTimeAccum := gTimeAccum + elapsedMs;
-
+  // --- FIXED STEP parametry (potrzebne zaraz do capów akumulatora)
   stepMs  := 1000.0 / FIXED_FPS;
   stepSec := stepMs / 1000.0;
 
+  // aktualizacja punktu odniesienia czasu
+  gLastTime := time;
+
+  // górny limit skoku czasu (po alt-tab, hiccup itp.)
+  if elapsedMs > 100.0 then
+    elapsedMs := 100.0;
+
+  // akumulacja czasu
+  gTimeAccum := gTimeAccum + elapsedMs;
+
+  // HARD CAP akumulatora – nie pozwól urosnąć bardziej niż MAX_STEPS
+  if gTimeAccum > (MAX_STEPS * stepMs) then
+    gTimeAccum := (MAX_STEPS * stepMs);
+
+  // --- stały krok aktualizacji
   steps := 0;
   while (gTimeAccum >= stepMs) and (steps < MAX_STEPS) do
   begin
@@ -3511,7 +3755,7 @@ begin
     gTimeAccum := gTimeAccum - stepMs;
     Inc(steps);
 
-    // [Opcjonalnie] pozwól wyjść w trakcie „doganiania” czasu
+    // pozwól wyjść w trakcie „doganiania” czasu
     if gWantsClose then
     begin
       gRunning := False;
@@ -3520,6 +3764,13 @@ begin
     end;
   end;
 
+  // jeżeli dojechaliśmy do MAX_STEPS, przytnij nadmiar, by nie „ciągnąć ogona”
+  if steps = MAX_STEPS then
+    if gTimeAccum > stepMs then
+      gTimeAccum := stepMs;
+
+  // rysowanie (przy stałym kroku możesz ewentualnie wyliczyć alfa = gTimeAccum/stepMs)
+  // jeśli nie zmieniasz sygnatury Draw, zostaw tak jak było:
   if Assigned(gCurrentDraw) then
     gCurrentDraw(gLastDt);
 
@@ -3541,10 +3792,10 @@ begin
     gLastFpsTime := window.performance.now();
   end;
 
-
   if gRunning then
     window.requestAnimationFrame(@GlobalAnimFrame);
 end;
+
 
 procedure Run(UpdateProc: TDeltaProc);
 begin
@@ -3588,26 +3839,216 @@ begin
   Result := gCloseOnEscape;
 end;
 
-{ ====== KOLORY WYGODNE ====== }
-function COLOR_WHITE: TColor; begin Result := ColorRGBA(255, 255, 255, 255); end;
-function COLOR_BLACK: TColor; begin Result := ColorRGBA(0, 0, 0, 255); end;
-function COLOR_RED: TColor; begin Result := ColorRGBA(255, 0, 0, 255); end;
-function COLOR_GREEN: TColor; begin Result := ColorRGBA(0, 255, 0, 255); end;
-function COLOR_BLUE: TColor; begin Result := ColorRGBA(0, 0, 255, 255); end;
-function COLOR_TRANSPARENT: TColor; begin Result := ColorRGBA(0, 0, 0, 0); end;
-function COLOR_LIGHTGRAY: TColor; begin Result := ColorRGBA(200, 200, 200, 255); end;
-function COLOR_GRAY: TColor; begin Result := ColorRGBA(130, 130, 130, 255); end;
-function COLOR_DARKGRAY: TColor; begin Result := ColorRGBA(80, 80, 80, 255); end;
-function COLOR_YELLOW: TColor; begin Result := ColorRGBA(253, 249, 0, 255); end;
-function COLOR_GOLD: TColor; begin Result := ColorRGBA(255, 203, 0, 255); end;
-function COLOR_ORANGE: TColor; begin Result := ColorRGBA(255, 161, 0, 255); end;
-function COLOR_PINK: TColor; begin Result := ColorRGBA(255, 109, 194, 255); end;
-function COLOR_MAROON: TColor; begin Result := ColorRGBA(190, 33, 55, 255); end;
-function COLOR_PURPLE: TColor; begin Result := ColorRGBA(128, 0, 128, 255); end;
-function COLOR_VIOLET: TColor; begin Result := ColorRGBA(238, 130, 238, 255); end;
-function COLOR_BROWN: TColor; begin Result := ColorRGBA(165, 42, 42, 255); end;
+{ ====== KOLORY KLASYCZNE (HTML/CSS/X11) ====== }
+function COLOR_ALICEBLUE: TColor; begin Result := ColorRGBA(240, 248, 255, 255); end;
+function COLOR_ANTIQUEWHITE: TColor; begin Result := ColorRGBA(250, 235, 215, 255); end;
+function COLOR_AQUA: TColor; begin Result := ColorRGBA(0, 255, 255, 255); end;        { alias CYAN }
+function COLOR_AQUAMARINE: TColor; begin Result := ColorRGBA(127, 255, 212, 255); end;
+function COLOR_AZURE: TColor; begin Result := ColorRGBA(240, 255, 255, 255); end;
 function COLOR_BEIGE: TColor; begin Result := ColorRGBA(245, 245, 220, 255); end;
-function COLOR_MAGENTA: TColor; begin Result := ColorRGBA(255, 0, 255, 255); end;
-function COLOR_CYAN: TColor; begin Result := ColorRGBA(0, 255, 255, 255); end;
+function COLOR_BISQUE: TColor; begin Result := ColorRGBA(255, 228, 196, 255); end;
+function COLOR_BLACK: TColor; begin Result := ColorRGBA(0, 0, 0, 255); end;
+function COLOR_BLANCHEDALMOND: TColor; begin Result := ColorRGBA(255, 235, 205, 255); end;
+function COLOR_BLUE: TColor; begin Result := ColorRGBA(0, 0, 255, 255); end;
+function COLOR_BLUEVIOLET: TColor; begin Result := ColorRGBA(138, 43, 226, 255); end;
+function COLOR_BROWN: TColor; begin Result := ColorRGBA(165, 42, 42, 255); end;
+function COLOR_BURLYWOOD: TColor; begin Result := ColorRGBA(222, 184, 135, 255); end;
+function COLOR_CADETBLUE: TColor; begin Result := ColorRGBA(95, 158, 160, 255); end;
+function COLOR_CHARTREUSE: TColor; begin Result := ColorRGBA(127, 255, 0, 255); end;
+function COLOR_CHOCOLATE: TColor; begin Result := ColorRGBA(210, 105, 30, 255); end;
+function COLOR_CORAL: TColor; begin Result := ColorRGBA(255, 127, 80, 255); end;
+function COLOR_CORNFLOWERBLUE: TColor; begin Result := ColorRGBA(100, 149, 237, 255); end;
+function COLOR_CORNSILK: TColor; begin Result := ColorRGBA(255, 248, 220, 255); end;
+function COLOR_CRIMSON: TColor; begin Result := ColorRGBA(220, 20, 60, 255); end;
+function COLOR_CYAN: TColor; begin Result := ColorRGBA(0, 255, 255, 255); end;          { alias AQUA }
+function COLOR_DARKBLUE: TColor; begin Result := ColorRGBA(0, 0, 139, 255); end;
+function COLOR_DARKCYAN: TColor; begin Result := ColorRGBA(0, 139, 139, 255); end;
+function COLOR_DARKGOLDENROD: TColor; begin Result := ColorRGBA(184, 134, 11, 255); end;
+function COLOR_DARKGRAY: TColor; begin Result := ColorRGBA(169, 169, 169, 255); end;
+function COLOR_DARKGREY: TColor; begin Result := ColorRGBA(169, 169, 169, 255); end;   { alias }
+function COLOR_DARKGREEN: TColor; begin Result := ColorRGBA(0, 100, 0, 255); end;
+function COLOR_DARKKHAKI: TColor; begin Result := ColorRGBA(189, 183, 107, 255); end;
+function COLOR_DARKMAGENTA: TColor; begin Result := ColorRGBA(139, 0, 139, 255); end;
+function COLOR_DARKOLIVEGREEN: TColor; begin Result := ColorRGBA(85, 107, 47, 255); end;
+function COLOR_DARKORANGE: TColor; begin Result := ColorRGBA(255, 140, 0, 255); end;
+function COLOR_DARKORCHID: TColor; begin Result := ColorRGBA(153, 50, 204, 255); end;
+function COLOR_DARKRED: TColor; begin Result := ColorRGBA(139, 0, 0, 255); end;
+function COLOR_DARKSALMON: TColor; begin Result := ColorRGBA(233, 150, 122, 255); end;
+function COLOR_DARKSEAGREEN: TColor; begin Result := ColorRGBA(143, 188, 143, 255); end;
+function COLOR_DARKSLATEBLUE: TColor; begin Result := ColorRGBA(72, 61, 139, 255); end;
+function COLOR_DARKSLATEGRAY: TColor; begin Result := ColorRGBA(47, 79, 79, 255); end;
+function COLOR_DARKSLATEGREY: TColor; begin Result := ColorRGBA(47, 79, 79, 255); end;  { alias }
+function COLOR_DARKTURQUOISE: TColor; begin Result := ColorRGBA(0, 206, 209, 255); end;
+function COLOR_DARKVIOLET: TColor; begin Result := ColorRGBA(148, 0, 211, 255); end;
+function COLOR_DEEPPINK: TColor; begin Result := ColorRGBA(255, 20, 147, 255); end;
+function COLOR_DEEPSKYBLUE: TColor; begin Result := ColorRGBA(0, 191, 255, 255); end;
+function COLOR_DIMGRAY: TColor; begin Result := ColorRGBA(105, 105, 105, 255); end;
+function COLOR_DIMGREY: TColor; begin Result := ColorRGBA(105, 105, 105, 255); end;     { alias }
+function COLOR_DODGERBLUE: TColor; begin Result := ColorRGBA(30, 144, 255, 255); end;
+function COLOR_FIREBRICK: TColor; begin Result := ColorRGBA(178, 34, 34, 255); end;
+function COLOR_FLORALWHITE: TColor; begin Result := ColorRGBA(255, 250, 240, 255); end;
+function COLOR_FORESTGREEN: TColor; begin Result := ColorRGBA(34, 139, 34, 255); end;
+function COLOR_FUCHSIA: TColor; begin Result := ColorRGBA(255, 0, 255, 255); end;       { alias MAGENTA }
+function COLOR_GAINSBORO: TColor; begin Result := ColorRGBA(220, 220, 220, 255); end;
+function COLOR_GHOSTWHITE: TColor; begin Result := ColorRGBA(248, 248, 255, 255); end;
+function COLOR_GOLD: TColor; begin Result := ColorRGBA(255, 215, 0, 255); end;
+function COLOR_GOLDENROD: TColor; begin Result := ColorRGBA(218, 165, 32, 255); end;
+function COLOR_GRAY: TColor; begin Result := ColorRGBA(128, 128, 128, 255); end;
+function COLOR_GREY: TColor; begin Result := ColorRGBA(128, 128, 128, 255); end;        { alias }
+function COLOR_GREEN: TColor; begin Result := ColorRGBA(0, 128, 0, 255); end;
+function COLOR_GREENYELLOW: TColor; begin Result := ColorRGBA(173, 255, 47, 255); end;
+function COLOR_HONEYDEW: TColor; begin Result := ColorRGBA(240, 255, 240, 255); end;
+function COLOR_HOTPINK: TColor; begin Result := ColorRGBA(255, 105, 180, 255); end;
+function COLOR_INDIANRED: TColor; begin Result := ColorRGBA(205, 92, 92, 255); end;
+function COLOR_INDIGO: TColor; begin Result := ColorRGBA(75, 0, 130, 255); end;
+function COLOR_IVORY: TColor; begin Result := ColorRGBA(255, 255, 240, 255); end;
+function COLOR_KHAKI: TColor; begin Result := ColorRGBA(240, 230, 140, 255); end;
+function COLOR_LAVENDER: TColor; begin Result := ColorRGBA(230, 230, 250, 255); end;
+function COLOR_LAVENDERBLUSH: TColor; begin Result := ColorRGBA(255, 240, 245, 255); end;
+function COLOR_LAWNGREEN: TColor; begin Result := ColorRGBA(124, 252, 0, 255); end;
+function COLOR_LEMONCHIFFON: TColor; begin Result := ColorRGBA(255, 250, 205, 255); end;
+function COLOR_LIGHTBLUE: TColor; begin Result := ColorRGBA(173, 216, 230, 255); end;
+function COLOR_LIGHTCORAL: TColor; begin Result := ColorRGBA(240, 128, 128, 255); end;
+function COLOR_LIGHTCYAN: TColor; begin Result := ColorRGBA(224, 255, 255, 255); end;
+function COLOR_LIGHTGOLDENRODYELLOW: TColor; begin Result := ColorRGBA(250, 250, 210, 255); end;
+function COLOR_LIGHTGRAY: TColor; begin Result := ColorRGBA(211, 211, 211, 255); end;
+function COLOR_LIGHTGREY: TColor; begin Result := ColorRGBA(211, 211, 211, 255); end;    { alias }
+function COLOR_LIGHTGREEN: TColor; begin Result := ColorRGBA(144, 238, 144, 255); end;
+function COLOR_LIGHTPINK: TColor; begin Result := ColorRGBA(255, 182, 193, 255); end;
+function COLOR_LIGHTSALMON: TColor; begin Result := ColorRGBA(255, 160, 122, 255); end;
+function COLOR_LIGHTSEAGREEN: TColor; begin Result := ColorRGBA(32, 178, 170, 255); end;
+function COLOR_LIGHTSKYBLUE: TColor; begin Result := ColorRGBA(135, 206, 250, 255); end;
+function COLOR_LIGHTSLATEGRAY: TColor; begin Result := ColorRGBA(119, 136, 153, 255); end;
+function COLOR_LIGHTSLATEGREY: TColor; begin Result := ColorRGBA(119, 136, 153, 255); end; { alias }
+function COLOR_LIGHTSTEELBLUE: TColor; begin Result := ColorRGBA(176, 196, 222, 255); end;
+function COLOR_LIGHTYELLOW: TColor; begin Result := ColorRGBA(255, 255, 224, 255); end;
+function COLOR_LIME: TColor; begin Result := ColorRGBA(0, 255, 0, 255); end;
+function COLOR_LIMEGREEN: TColor; begin Result := ColorRGBA(50, 205, 50, 255); end;
+function COLOR_LINEN: TColor; begin Result := ColorRGBA(250, 240, 230, 255); end;
+function COLOR_MAGENTA: TColor; begin Result := ColorRGBA(255, 0, 255, 255); end;        { alias FUCHSIA }
+function COLOR_MAROON: TColor; begin Result := ColorRGBA(128, 0, 0, 255); end;
+function COLOR_MEDIUMAQUAMARINE: TColor; begin Result := ColorRGBA(102, 205, 170, 255); end;
+function COLOR_MEDIUMBLUE: TColor; begin Result := ColorRGBA(0, 0, 205, 255); end;
+function COLOR_MEDIUMORCHID: TColor; begin Result := ColorRGBA(186, 85, 211, 255); end;
+function COLOR_MEDIUMPURPLE: TColor; begin Result := ColorRGBA(147, 112, 219, 255); end;
+function COLOR_MEDIUMSEAGREEN: TColor; begin Result := ColorRGBA(60, 179, 113, 255); end;
+function COLOR_MEDIUMSLATEBLUE: TColor; begin Result := ColorRGBA(123, 104, 238, 255); end;
+function COLOR_MEDIUMSPRINGGREEN: TColor; begin Result := ColorRGBA(0, 250, 154, 255); end;
+function COLOR_MEDIUMTURQUOISE: TColor; begin Result := ColorRGBA(72, 209, 204, 255); end;
+function COLOR_MEDIUMVIOLETRED: TColor; begin Result := ColorRGBA(199, 21, 133, 255); end;
+function COLOR_MIDNIGHTBLUE: TColor; begin Result := ColorRGBA(25, 25, 112, 255); end;
+function COLOR_MINTCREAM: TColor; begin Result := ColorRGBA(245, 255, 250, 255); end;
+function COLOR_MISTYROSE: TColor; begin Result := ColorRGBA(255, 228, 225, 255); end;
+function COLOR_MOCCASIN: TColor; begin Result := ColorRGBA(255, 228, 181, 255); end;
+function COLOR_NAVAJOWHITE: TColor; begin Result := ColorRGBA(255, 222, 173, 255); end;
+function COLOR_NAVY: TColor; begin Result := ColorRGBA(0, 0, 128, 255); end;
+function COLOR_OLDLACE: TColor; begin Result := ColorRGBA(253, 245, 230, 255); end;
+function COLOR_OLIVE: TColor; begin Result := ColorRGBA(128, 128, 0, 255); end;
+function COLOR_OLIVEDRAB: TColor; begin Result := ColorRGBA(107, 142, 35, 255); end;
+function COLOR_ORANGE: TColor; begin Result := ColorRGBA(255, 165, 0, 255); end;
+function COLOR_ORANGERED: TColor; begin Result := ColorRGBA(255, 69, 0, 255); end;
+function COLOR_ORCHID: TColor; begin Result := ColorRGBA(218, 112, 214, 255); end;
+function COLOR_PALEGOLDENROD: TColor; begin Result := ColorRGBA(238, 232, 170, 255); end;
+function COLOR_PALEGREEN: TColor; begin Result := ColorRGBA(152, 251, 152, 255); end;
+function COLOR_PALETURQUOISE: TColor; begin Result := ColorRGBA(175, 238, 238, 255); end;
+function COLOR_PALEVIOLETRED: TColor; begin Result := ColorRGBA(219, 112, 147, 255); end;
+function COLOR_PAPAYAWHIP: TColor; begin Result := ColorRGBA(255, 239, 213, 255); end;
+function COLOR_PEACHPUFF: TColor; begin Result := ColorRGBA(255, 218, 185, 255); end;
+function COLOR_PERU: TColor; begin Result := ColorRGBA(205, 133, 63, 255); end;
+function COLOR_PINK: TColor; begin Result := ColorRGBA(255, 192, 203, 255); end;
+function COLOR_PLUM: TColor; begin Result := ColorRGBA(221, 160, 221, 255); end;
+function COLOR_POWDERBLUE: TColor; begin Result := ColorRGBA(176, 224, 230, 255); end;
+function COLOR_PURPLE: TColor; begin Result := ColorRGBA(128, 0, 128, 255); end;
+function COLOR_REBECCAPURPLE: TColor; begin Result := ColorRGBA(102, 51, 153, 255); end;
+function COLOR_RED: TColor; begin Result := ColorRGBA(255, 0, 0, 255); end;
+function COLOR_ROSYBROWN: TColor; begin Result := ColorRGBA(188, 143, 143, 255); end;
+function COLOR_ROYALBLUE: TColor; begin Result := ColorRGBA(65, 105, 225, 255); end;
+function COLOR_SADDLEBROWN: TColor; begin Result := ColorRGBA(139, 69, 19, 255); end;
+function COLOR_SALMON: TColor; begin Result := ColorRGBA(250, 128, 114, 255); end;
+function COLOR_SANDYBROWN: TColor; begin Result := ColorRGBA(244, 164, 96, 255); end;
+function COLOR_SEAGREEN: TColor; begin Result := ColorRGBA(46, 139, 87, 255); end;
+function COLOR_SEASHELL: TColor; begin Result := ColorRGBA(255, 245, 238, 255); end;
+function COLOR_SIENNA: TColor; begin Result := ColorRGBA(160, 82, 45, 255); end;
+function COLOR_SILVER: TColor; begin Result := ColorRGBA(192, 192, 192, 255); end;
+function COLOR_SKYBLUE: TColor; begin Result := ColorRGBA(135, 206, 235, 255); end;
+function COLOR_SLATEBLUE: TColor; begin Result := ColorRGBA(106, 90, 205, 255); end;
+function COLOR_SLATEGRAY: TColor; begin Result := ColorRGBA(112, 128, 144, 255); end;
+function COLOR_SLATEGREY: TColor; begin Result := ColorRGBA(112, 128, 144, 255); end;    { alias }
+function COLOR_SNOW: TColor; begin Result := ColorRGBA(255, 250, 250, 255); end;
+function COLOR_SPRINGGREEN: TColor; begin Result := ColorRGBA(0, 255, 127, 255); end;
+function COLOR_STEELBLUE: TColor; begin Result := ColorRGBA(70, 130, 180, 255); end;
+function COLOR_TAN: TColor; begin Result := ColorRGBA(210, 180, 140, 255); end;
+function COLOR_TEAL: TColor; begin Result := ColorRGBA(0, 128, 128, 255); end;
+function COLOR_THISTLE: TColor; begin Result := ColorRGBA(216, 191, 216, 255); end;
+function COLOR_TOMATO: TColor; begin Result := ColorRGBA(255, 99, 71, 255); end;
+function COLOR_TURQUOISE: TColor; begin Result := ColorRGBA(64, 224, 208, 255); end;
+function COLOR_VIOLET: TColor; begin Result := ColorRGBA(238, 130, 238, 255); end;
+function COLOR_WHEAT: TColor; begin Result := ColorRGBA(245, 222, 179, 255); end;
+function COLOR_WHITE: TColor; begin Result := ColorRGBA(255, 255, 255, 255); end;
+function COLOR_WHITESMOKE: TColor; begin Result := ColorRGBA(245, 245, 245, 255); end;
+function COLOR_YELLOW: TColor; begin Result := ColorRGBA(255, 255, 0, 255); end;
+function COLOR_YELLOWGREEN: TColor; begin Result := ColorRGBA(154, 205, 50, 255); end;
+
+
+// ====== DODATKOWE POMOCNICZE PROCEDURY – KWADRATY I OBRYSY ======
+
+procedure DrawSquare(x, y, size: Integer; const color: TColor);
+begin
+  DrawRectangle(x, y, size, size, color);
+end;
+
+procedure DrawSquareLines(x, y, size: Integer; const color: TColor; thickness: Integer = 1);
+begin
+  DrawRectangleLines(x, y, size, size, color, thickness);
+end;
+
+procedure DrawSquareFromCenter(cx, cy, size: Integer; const color: TColor);
+var
+  x, y: Integer;
+begin
+  x := cx - (size div 2);
+  y := cy - (size div 2);
+  DrawRectangle(x, y, size, size, color);
+end;
+
+procedure DrawSquareFromCenterLines(cx, cy, size: Integer; const color: TColor; thickness: Integer = 1);
+var
+  x, y: Integer;
+begin
+  x := cx - (size div 2);
+  y := cy - (size div 2);
+  DrawRectangleLines(x, y, size, size, color, thickness);
+end;
+
+// Obrys zaokrąglonego prostokąta z kontrolą grubości
+procedure DrawRectangleRoundedStroke(x, y, w, h, radius: Integer; const color: TColor; thickness: Integer = 1);
+begin
+  gCtx.lineWidth := thickness;
+  DrawRectangleRounded(x, y, w, h, radius, color, False);
+end;
+
+procedure DrawRectangleRoundedRecStroke(const rec: TRectangle; radius: Double; const color: TColor; thickness: Integer = 1);
+begin
+  gCtx.lineWidth := thickness;
+  DrawRectangleRounded(Round(rec.x), Round(rec.y), Round(rec.width), Round(rec.height), Round(radius), color, False);
+end;
+
+// Batch obrysów prostokątów (analogiczny do batch fill)
+procedure BeginRectStrokeBatch(const color: TColor; thickness: Integer = 1);
+begin
+  gCtx.beginPath;
+  gCtx.strokeStyle := ColorToCanvasRGBA(color);
+  gCtx.lineWidth := thickness;
+end;
+
+procedure BatchRectStroke(x, y, w, h: Integer);
+begin
+  gCtx.rect(x, y, w, h);
+end;
+
+procedure EndRectStrokeBatch;
+begin
+  gCtx.stroke;
+end;
 
 end.

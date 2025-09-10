@@ -77,6 +77,11 @@ procedure BeginSpriteBatch;
 procedure BatchSprite(const s: TSprite);
 procedure EndSpriteBatch;
 
+// === Pauza (API publiczne) ===
+procedure PauseOn;
+procedure PauseOff;
+procedure PauseToggle;
+function IsPaused: Boolean;
 { ==== Animation ============================================================= }
 type
   TAnimFrame = record
@@ -214,7 +219,28 @@ type
 
 procedure LoadTiledJSON(const url: String; const atlasResolver: TAtlasResolver;
                         const onReady: TTiledReady);
+// Proste IO (tekst / JSON / bin)
+type
+  TOnText  = reference to procedure(const text: String);
+  TOnJSON  = reference to procedure(const obj: TJSObject);
+  TOnBytes = reference to procedure(const bytes: TJSUint8Array);
 
+procedure LoadText(const url: String; const onReady: TOnText);
+procedure LoadJSON(const url: String; const onReady: TOnJSON);
+procedure LoadBIN (const url: String; const onReady: TOnBytes);
+
+type
+  // callback bez argumentów, pozwala przekazywać procedury anonimowe
+  TNoArgCallback = reference to procedure;
+
+procedure InjectCss(const css: String);
+function  ExtToMime(const Url: string): string;
+function  ExtToFormat(const Url: string): string;
+procedure PreloadFont(const Url: string);
+function  FontIsLoaded(const CssFont: string): Boolean;
+procedure StartFontLoad(const Sample: string);
+procedure LoadWebFont(const Family, Url: string; OnReady: TNoArgCallback = nil);
+procedure UseWebFont(const Family: string; SizePx: Integer);
 { ==== Arcade Physics + one-way + triggery ================================== }
 type
   TRigidBody = record
@@ -251,8 +277,9 @@ type
 procedure ScenePush(const s: IScene);
 procedure ScenePop;
 procedure SceneReplace(const s: IScene);
-procedure SceneUpdate(dt: Double);
-procedure SceneDraw;
+procedure SceneUpdate(const dt: Double);
+procedure SceneDraw(const dt: Double);
+
 
 { ==== Input Map ============================================================= }
 type
@@ -349,10 +376,16 @@ type
 var
   gBatch: array of TSpriteBatchItem;
   gBatchActive: Boolean = False;
-
+  gPaused: Boolean = False;
   // debug
   gDebugOn: Boolean = True;
   gDrawCalls: Integer = 0;
+
+procedure PauseOn; begin gPaused := True; end;
+procedure PauseOff; begin gPaused := False; end;
+procedure PauseToggle; begin gPaused := not gPaused; end;
+function IsPaused: Boolean; begin Exit(gPaused); end;
+
 
 procedure DebugCountDrawCall;
 begin
@@ -1034,6 +1067,200 @@ begin
   end;
   xhr.send;
 end;
+procedure LoadText(const url: String; const onReady: TOnText);
+var
+  xhr: TJSXMLHttpRequest;
+begin
+  xhr := TJSXMLHttpRequest.new;
+  xhr.open('GET', url, True);
+  xhr.overrideMimeType('text/plain; charset=utf-8');
+  xhr.onreadystatechange := procedure
+  begin
+    if (xhr.readyState = 4) then
+    begin
+      if (xhr.status = 200) then
+      begin
+        if Assigned(onReady) then onReady(String(xhr.responseText));
+      end
+      else
+        console.warn('LoadText failed: ' + url + ' status=' + IntToStr(xhr.status));
+    end;
+  end;
+  xhr.send;
+end;
+
+procedure LoadJSON(const url: String; const onReady: TOnJSON);
+var
+  xhr: TJSXMLHttpRequest;
+begin
+  xhr := TJSXMLHttpRequest.new;
+  xhr.open('GET', url, True);
+  xhr.overrideMimeType('application/json; charset=utf-8');
+  xhr.onreadystatechange := procedure
+  var
+    obj: TJSObject;
+  begin
+    if (xhr.readyState = 4) then
+    begin
+      if (xhr.status = 200) then
+      begin
+        try
+          // pas2js: JSON.parse zwraca JS Value; rzutujemy na TJSObject
+          obj := TJSObject(TJSJSON.parse(xhr.responseText));
+          if Assigned(onReady) then onReady(obj);
+        except
+          on E: Exception do
+            console.warn('LoadJSON parse error: ' + E.Message + ' url=' + url);
+        end;
+      end
+      else
+        console.warn('LoadJSON failed: ' + url + ' status=' + IntToStr(xhr.status));
+    end;
+  end;
+  xhr.send;
+end;
+
+procedure LoadBIN(const url: String; const onReady: TOnBytes);
+var
+  xhr: TJSXMLHttpRequest;
+begin
+  xhr := TJSXMLHttpRequest.new;
+  xhr.open('GET', url, True);
+  xhr.responseType := 'arraybuffer';
+  xhr.onreadystatechange := procedure
+  var
+    buf: TJSArrayBuffer;
+    u8 : TJSUint8Array;
+  begin
+    if (xhr.readyState = 4) then
+    begin
+      if (xhr.status = 200) then
+      begin
+        buf := TJSArrayBuffer(xhr.response);
+        u8  := TJSUint8Array.new(buf);
+        if Assigned(onReady) then onReady(u8);
+      end
+      else
+        console.warn('LoadBIN failed: ' + url + ' status=' + IntToStr(xhr.status));
+    end;
+  end;
+  xhr.send;
+end;
+
+procedure InjectCss(const css: String);
+var
+  styleEl: TJSHTMLStyleElement;
+begin
+  styleEl := TJSHTMLStyleElement(document.createElement('style'));
+  styleEl.innerHTML := css;
+  document.head.appendChild(styleEl);
+end;
+
+function ExtToMime(const Url: string): string;
+var
+  e: string;
+begin
+  e := LowerCase(ExtractFileExt(Url));
+  if e = '.woff2' then Exit('font/woff2');
+  if e = '.woff'  then Exit('font/woff');
+  if e = '.ttf'   then Exit('font/ttf');
+  if e = '.otf'   then Exit('font/otf');
+  Result := '';
+end;
+function ExtToFormat(const Url: string): string;
+var
+  e: string;
+begin
+  e := LowerCase(ExtractFileExt(Url));
+  if e = '.woff2' then Exit('woff2');
+  if e = '.woff'  then Exit('woff');
+  if e = '.ttf'   then Exit('truetype');
+  if e = '.otf'   then Exit('opentype');
+  Result := '';
+end;
+
+
+procedure PreloadFont(const Url: string);
+var
+  linkEl: TJSElement;
+  mime: string;
+begin
+  linkEl := TJSElement(document.createElement('link'));
+  linkEl.setAttribute('rel', 'preload');
+  linkEl.setAttribute('as', 'font');
+  linkEl.setAttribute('href', Url);
+  linkEl.setAttribute('crossorigin', 'anonymous');
+
+  mime := ExtToMime(Url);
+  if mime <> '' then
+    linkEl.setAttribute('type', mime);
+
+  document.head.appendChild(linkEl);
+end;
+
+function FontIsLoaded(const CssFont: string): Boolean;
+begin
+  asm
+    return !!(document.fonts && document.fonts.check(CssFont));
+  end;
+end;
+
+procedure StartFontLoad(const Sample: string);
+begin
+  asm
+    if (document.fonts && document.fonts.load) {
+      document.fonts.load(Sample);
+    } else {
+      var s = document.createElement('span');
+      s.textContent = 'AaŻżŁł';
+      s.style.font = Sample;
+      s.style.position = 'absolute';
+      s.style.left = '-9999px';
+      document.body.appendChild(s);
+    }
+  end;
+end;
+
+procedure LoadWebFont(const Family, Url: string; OnReady: TNoArgCallback = nil);
+var
+  css, sample, fmt: string;
+  tries: Integer;
+
+  procedure Poll;
+  begin
+    if FontIsLoaded(sample) or (tries >= 200) then
+    begin
+      if Assigned(OnReady) then OnReady();
+      Exit;
+    end;
+    Inc(tries);
+    window.setTimeout(@Poll, 50);
+  end;
+
+begin
+  PreloadFont(Url);
+
+  fmt := ExtToFormat(Url);
+  if fmt = '' then fmt := 'truetype';
+
+  css := '@font-face{' +
+         'font-family:"' + Family + '";' +
+         'src:url(' + Url + ') format("' + fmt + '");' +
+         'font-display:swap;font-style:normal;font-weight:400;' +
+         '}';
+  InjectCss(css);
+
+  sample := '12px "' + Family + '"';
+  StartFontLoad(sample);
+
+  tries := 0;
+  if Assigned(OnReady) then Poll;
+end;
+
+procedure UseWebFont(const Family: string; SizePx: Integer);
+begin
+  SetTextFont(IntToStr(SizePx) + 'px "' + Family + '", system-ui, sans-serif');
+end;
 
 { ==== Physics =============================================================== }
 function Overlap(a, b: TRectangle): Boolean;
@@ -1199,18 +1426,18 @@ begin
   ScenePush(s);
 end;
 
-procedure SceneUpdate(dt: Double);
+procedure SceneUpdate(const dt: Double);
 begin
-  if Length(gSceneStack)=0 then Exit;
+  if gPaused then Exit;  // <<<< TUTAJ blokada przy pauzie
+  if Length(gSceneStack) = 0 then Exit;
   gSceneStack[High(gSceneStack)].Update(dt);
 end;
 
-procedure SceneDraw;
+procedure SceneDraw(const dt: Double);
 begin
-  if Length(gSceneStack)=0 then Exit;
+  if Length(gSceneStack) = 0 then Exit;
   gSceneStack[High(gSceneStack)].Draw;
 end;
-
 { ==== Input Map ============================================================= }
 type
   TBinding = record
@@ -1382,7 +1609,7 @@ type
 
 var
   gNamedTex: array of TNamedTex;
- gAssetsGen: Integer = 0;           // <- DODAJ TO
+ gAssetsGen: Integer = 0;           
 procedure AssetsLoad(const names, urls: array of String; const onAll: TNoArgProc);
 var
   i, total: Integer;
