@@ -1,0 +1,46 @@
+Wilga - Instrukcja użytkowania
+WYMAGANIA
+
+FPC (Free Pascal Compiler) 3.2.x lub nowszy
+
+(opcjonalnie) Lazarus – środowisko IDE
+
+ pas2js 3.2.0 – do kompilacji na JavaScript
+
+INSTALACJA
+
+Zainstaluj FPC i pas2js
+
+Dodaj katalog z pas2js do zmiennych środowiskowych (PATH).
+
+Przy pierwszej kompilacji pas2js zostanie wygenerowany plik rtl.js – skopiuj go do folderu projektu, w którym znajduje się index.html.
+
+KOMPILACJA – PAS2JS
+
+Stwórz plik programu (np. gra.pas) w folderze projektu.
+
+W Geany (lub w terminalu) uruchom:
+
+pas2js -Jc -Jirtl.js -Tbrowser gra.pas
+
+(zastąp gra.pas nazwą swojego programu).
+
+W katalogu projektu pojawi się gra.js oraz rtl.js.
+
+URUCHOMIENIE
+
+Uruchom lokalny serwer (np. Python):
+
+python -m http.server 8000
+
+Następnie wejdź w przeglądarce na adres:
+
+http://127.0.0.1:8000/index.html
+
+WAŻNE
+
+Jeśli Twoja gra korzysta z zasobów (np. obrazów, dźwięków), nie otwieraj pliku index.html bezpośrednio (np. przez file://).
+
+Przeglądarka w takim trybie nie załaduje zasobów - zawsze uruchamiaj grę przez lokalny serwer HTTP.
+
+Przykładowy index.html znajduje się w tym samym folderze co powyższy plik.
