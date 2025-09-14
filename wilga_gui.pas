@@ -189,6 +189,7 @@ type
     constructor Create(ax, ay, aw, ah: Double); override;
     procedure Update; override;
     procedure Draw; override;
+    function HitTitleBar(const p: TInputVector): Boolean;
 
     procedure AddChild(widget: TWidget);
     procedure Close;
@@ -199,7 +200,9 @@ type
 
   { ---------- GUI Manager ---------- }
   TGUIManager = class
-  private
+  public
+    MouseCapturedBy: TWidget; // captures mouse during clicks/drags
+private
     Widgets: array of TWidget;
     FocusedWidget: TWidget;
     IsAnyWindowDragging: Boolean;
@@ -224,7 +227,7 @@ var
   GUI: TGUIManager;
 
 implementation
-
+function IsChildOfPanel(widget: TWidget; panel: TPanel): Boolean;forward;
 { ===== Helpers: geometry ===== }
 
 function RectContainsPoint(const R: TRectangle; const P: TInputVector): Boolean; inline;
@@ -393,27 +396,51 @@ begin
   mp := GetMousePosition;
   isHover := ContainsPoint(mp);
 
+  // ktoś inny trzyma capture (np. okno) -> nie reagujemy
+  if Assigned(GUI.MouseCapturedBy) and (GUI.MouseCapturedBy <> Self) then
+    Exit;
+
   if not InPress then
   begin
     if isHover and IsMouseButtonPressed(0) then
     begin
       InPress := True;
       State := wsActive;
-      if Assigned(OnClick) then OnClick(Self); // klik na press
       Exit;
     end;
+  end
+  else
+  begin
+    if not IsMouseButtonDown(0) then
+    begin
+      if isHover and Assigned(OnClick) then
+        OnClick(Self); // klik na release
+      InPress := False;
+      State := wsNormal;
+      Exit;
+    end;
+  end;
 
-    if isHover then State := wsHover else State := wsNormal;
+  // kosmetyka
+  if isHover then
+  begin
+    if IsMouseButtonDown(0) then
+      State := wsActive
+    else if State <> wsHover then
+      State := wsHover;
   end
   else
   begin
     if not IsMouseButtonDown(0) then
     begin
       InPress := False;
-      if isHover then State := wsHover else State := wsNormal;
+      if State <> wsDisabled then
+        State := wsNormal;
     end;
   end;
 end;
+
+
 
 procedure TButton.Draw;
 var
@@ -559,29 +586,41 @@ end;
 
 procedure TCheckbox.Update;
 var
-  mp: TInputVector; isHover: Boolean;
+  mp: TInputVector; 
+  isHover: Boolean;
 begin
   if not Visible or not Enabled then Exit;
 
   mp := GetMousePosition;
   isHover := ContainsPoint(mp);
 
+  // jeśli ktoś inny trzyma capture — nie reagujemy
+  if Assigned(GUI.MouseCapturedBy) and (GUI.MouseCapturedBy <> Self) then
+    Exit;
+
   if not InPress then
   begin
     if isHover and IsMouseButtonPressed(0) then
     begin
       InPress := True;
-      Checked := not Checked;
-      if Assigned(OnClick) then OnClick(Self);
+      State := wsActive;
+      Exit;
     end;
     if isHover then State := wsHover else State := wsNormal;
   end
   else
   begin
+    // klik na release
     if not IsMouseButtonDown(0) then
     begin
       InPress := False;
-      if isHover then State := wsHover else State := wsNormal;
+      if isHover then
+      begin
+        Checked := not Checked;
+        if Assigned(OnClick) then OnClick(Self);
+      end;
+      State := wsNormal;
+      Exit;
     end;
   end;
 end;
@@ -852,6 +891,16 @@ begin
   ContentPanel := TPanel.Create(Bounds.x, Bounds.y + TitleBarHeight, Bounds.width, Bounds.height - TitleBarHeight);
   ContentPanel.Color := COLOR_LIGHTGRAY;
 end;
+function TWindow.HitTitleBar(const p: TInputVector): Boolean;
+var
+  titleBarRect: TRectangle;
+begin
+  titleBarRect := RectangleCreate(Bounds.x, Bounds.y, Bounds.width, TitleBarHeight);
+  Result :=
+    RectContainsPoint(titleBarRect, p) and
+    (not RectContainsPoint(CloseButton.Bounds, p)) and
+    (not RectContainsPoint(MinimizeButton.Bounds, p));
+end;
 
 procedure TWindow.Update;
 var
@@ -865,30 +914,36 @@ begin
   mp := GetMousePosition;
   titleBarRect := RectangleCreate(Bounds.x, Bounds.y, Bounds.width, TitleBarHeight);
 
-  // zakończ drag, gdy LPM nie jest wciśnięty
+  // --- Zakończenie przeciągania przy puszczeniu LPM
   if IsDragging and (not IsMouseButtonDown(0)) then
   begin
     IsDragging := False;
     GUI.IsAnyWindowDragging := False;
     State := wsNormal;
+    GUI.MouseCapturedBy := nil; // zwolnij capture
   end;
 
-  // --- Zminimalizowane: drag + przyciski ---
+  // ===================== ZMINIMALIZOWANE OKNO =====================
   if Minimized then
   begin
     overTitleBar := RectContainsPoint(titleBarRect, mp);
     overCloseBtn := RectContainsPoint(CloseButton.Bounds, mp);
     overMinBtn   := RectContainsPoint(MinimizeButton.Bounds, mp);
 
-    if (not IsDragging) and IsMouseButtonPressed(0) and overTitleBar and (not overCloseBtn) and (not overMinBtn) and (not GUI.IsAnyWindowDragging) then
+    // Start drag: LPM w pasku tytułu, ale nie nad przyciskami
+    if (not IsDragging) and IsMouseButtonPressed(0)
+       and overTitleBar and (not overCloseBtn) and (not overMinBtn)
+       and (not GUI.IsAnyWindowDragging) then
     begin
       IsDragging := True;
+      GUI.MouseCapturedBy := Self;          // capture dla tego okna
       GUI.IsAnyWindowDragging := True;
       DragOffset := NewVector(mp.x - Bounds.x, mp.y - Bounds.y);
       State := wsDragging;
       BringToFront;
     end;
 
+    // Przesuwanie okna podczas drag
     if IsDragging and IsMouseButtonDown(0) then
     begin
       Bounds.x := mp.x - DragOffset.x;
@@ -897,37 +952,47 @@ begin
       dx := Bounds.x - PrevWinX;
       dy := Bounds.y - PrevWinY;
 
-      CloseButton.Bounds.x    := CloseButton.Bounds.x + dx;
-      CloseButton.Bounds.y    := CloseButton.Bounds.y + dy;
+      // Przesuń kontrolki „przyklejone” do paska
+      CloseButton.Bounds.x := CloseButton.Bounds.x + dx;
+      CloseButton.Bounds.y := CloseButton.Bounds.y + dy;
+
       MinimizeButton.Bounds.x := MinimizeButton.Bounds.x + dx;
       MinimizeButton.Bounds.y := MinimizeButton.Bounds.y + dy;
 
-      ContentPanel.Bounds.x   := ContentPanel.Bounds.x + dx;
-      ContentPanel.Bounds.y   := ContentPanel.Bounds.y + dy;
+      // Jeśli masz ContentPanel aktywny w minimize — zachowaj spójność:
+      ContentPanel.Bounds.x := ContentPanel.Bounds.x + dx;
+      ContentPanel.Bounds.y := ContentPanel.Bounds.y + dy;
+      ContentPanel.OffsetChildren(dx, dy);
 
       PrevWinX := Bounds.x;
       PrevWinY := Bounds.y;
     end;
 
+    // Aktualizacja przycisków
     CloseButton.Update;
     MinimizeButton.Update;
-    Exit;
+    Exit; // zminimalizowane: nic więcej
   end;
 
-  // --- Normalne: drag + dzieci panelu ---
+  // ===================== NORMALNE OKNO =====================
   overTitleBar := RectContainsPoint(titleBarRect, mp);
   overCloseBtn := RectContainsPoint(CloseButton.Bounds, mp);
   overMinBtn   := RectContainsPoint(MinimizeButton.Bounds, mp);
 
-  if (not IsDragging) and IsMouseButtonPressed(0) and overTitleBar and (not overCloseBtn) and (not overMinBtn) and (not GUI.IsAnyWindowDragging) then
+  // Start drag: LPM w pasku tytułu, ale nie nad przyciskami
+  if (not IsDragging) and IsMouseButtonPressed(0)
+     and overTitleBar and (not overCloseBtn) and (not overMinBtn)
+     and (not GUI.IsAnyWindowDragging) then
   begin
     IsDragging := True;
+    GUI.MouseCapturedBy := Self;            // capture dla tego okna
     GUI.IsAnyWindowDragging := True;
     DragOffset := NewVector(mp.x - Bounds.x, mp.y - Bounds.y);
     State := wsDragging;
     BringToFront;
   end;
 
+  // Przesuwanie okna podczas drag
   if IsDragging and IsMouseButtonDown(0) then
   begin
     Bounds.x := mp.x - DragOffset.x;
@@ -936,8 +1001,10 @@ begin
     dx := Bounds.x - PrevWinX;
     dy := Bounds.y - PrevWinY;
 
-    CloseButton.Bounds.x    := CloseButton.Bounds.x + dx;
-    CloseButton.Bounds.y    := CloseButton.Bounds.y + dy;
+    // Przesuń kontrolki z paska oraz panel treści
+    CloseButton.Bounds.x := CloseButton.Bounds.x + dx;
+    CloseButton.Bounds.y := CloseButton.Bounds.y + dy;
+
     MinimizeButton.Bounds.x := MinimizeButton.Bounds.x + dx;
     MinimizeButton.Bounds.y := MinimizeButton.Bounds.y + dy;
 
@@ -949,10 +1016,12 @@ begin
     PrevWinY := Bounds.y;
   end;
 
+  // Aktualizacje dzieci
   CloseButton.Update;
   MinimizeButton.Update;
   ContentPanel.Update;
 end;
+
 
 procedure TWindow.Draw;
 var
@@ -1111,46 +1180,166 @@ begin
     Widgets[High(Widgets)] := widget;
   end;
 end;
+function IsChildOfWindow(widget, window: TWidget): Boolean;
+var
+  panel: TPanel;
+  i: Integer;
+begin
+  Result := False;
+  
+  if widget is TWindow then
+    Exit(False);
+    
+  if window is TWindow then
+  begin
+    panel := TWindow(window).ContentPanel;
+    
+    // Sprawdź czy widget jest bezpośrednim dzieckiem panelu okna
+    for i := 0 to High(panel.Children) do
+    begin
+      if panel.Children[i] = widget then
+        Exit(True);
+    end;
+    
+    // Sprawdź czy widget jest dzieckiem któregoś z dzieci panelu
+    for i := 0 to High(panel.Children) do
+    begin
+      if panel.Children[i] is TPanel then
+      begin
+        if IsChildOfPanel(widget, TPanel(panel.Children[i])) then
+          Exit(True);
+      end;
+    end;
+  end;
+end;
 
+function IsChildOfPanel(widget: TWidget; panel: TPanel): Boolean;
+var
+  i: Integer;
+begin
+  Result := False;
+  
+  for i := 0 to High(panel.Children) do
+  begin
+    if panel.Children[i] = widget then
+      Exit(True);
+      
+    if panel.Children[i] is TPanel then
+    begin
+      if IsChildOfPanel(widget, TPanel(panel.Children[i])) then
+        Exit(True);
+    end;
+  end;
+end;
 procedure TGUIManager.Update;
 var
   i: Integer;
   mp: TInputVector;
   w: TWidget;
+  win: TWindow;
+  topWindow: TWindow;
 begin
-  // stabilny reset "dragging"
+  // 1) Reset globalnego "dragging" i asekuracyjne czyszczenie capture na release
   if not IsMouseButtonDown(0) then
+  begin
     IsAnyWindowDragging := False;
+    MouseCapturedBy := nil;
+  end;
 
-  // globalny focus/blur TTextBox na press
+  mp := GetMousePosition;
+
+  // 2) Znajdź najwyższe okno pod kursorem (jeśli istnieje)
+  topWindow := nil;
+  for i := High(Widgets) downto 0 do
+  begin
+    if (Widgets[i] is TWindow) and Widgets[i].Visible and Widgets[i].ContainsPoint(mp) then
+    begin
+      topWindow := TWindow(Widgets[i]);
+      Break;
+    end;
+  end;
+
+  // 3) GLOBALNY PRESS HOOK
   if IsMouseButtonPressed(0) then
   begin
-    mp := GetMousePosition;
-    w := GetWidgetAt(mp.x, mp.y);
+    // 3a) Najpierw paski tytułu okien
+    for i := High(Widgets) downto 0 do
+      if Widgets[i] is TWindow then
+      begin
+        win := TWindow(Widgets[i]);
+        if win.Visible and win.HitTitleBar(mp) then
+        begin
+          MouseCapturedBy := win;
+          Break;
+        end;
+      end;
 
-    if (w is TTextBox) then
-      TTextBox(w).Focus
+    // 3b) Jeśli nie trafiliśmy w pasek tytułu — standardowo:
+    if MouseCapturedBy = nil then
+    begin
+      // Szukaj tylko w najwyższym oknie (jeśli istnieje)
+      if topWindow <> nil then
+        MouseCapturedBy := HitTestWidget(topWindow, mp)
+      else
+        MouseCapturedBy := GetWidgetAt(mp.x, mp.y);
+    end;
+
+    // 3c) Focus/blur dla TTextBox
+    if Assigned(MouseCapturedBy) and (MouseCapturedBy is TTextBox) then
+      TTextBox(MouseCapturedBy).Focus
     else if (FocusedWidget is TTextBox) then
       TTextBox(FocusedWidget).Blur;
   end;
 
-  // tooltip timer
-  if TooltipWidget <> nil then
+  // 4) Tooltips
+  if Assigned(TooltipWidget) then
     TooltipTimer := TooltipTimer + GetDeltaTime
   else
     TooltipTimer := 0.0;
 
-  // okna najpierw
-  for i := 0 to High(Widgets) do
-    if Widgets[i] is TWindow then
-      if (not IsAnyWindowDragging) or TWindow(Widgets[i]).IsDragging then
-        Widgets[i].Update;
+  // 5) Jeżeli ktoś trzyma capture — aktualizujemy WYŁĄCZNIE jego
+  if Assigned(MouseCapturedBy) then
+  begin
+    MouseCapturedBy.Update;
+    Exit;
+  end;
 
-  // reszta
-  for i := 0 to High(Widgets) do
-    if not (Widgets[i] is TWindow) then
+  // 6) Aktualizuj tylko widgety w najwyższym oknie pod kursorem
+  if topWindow <> nil then
+  begin
+    // Aktualizuj najpierw okno
+    topWindow.Update;
+    
+    // Aktualizuj tylko dzieci tego okna
+    for i := 0 to High(Widgets) do
+    begin
+      if (Widgets[i] <> topWindow) and IsChildOfWindow(Widgets[i], topWindow) then
+        Widgets[i].Update;
+    end;
+  end
+  else
+  begin
+    // Brak okien pod kursorem — aktualizuj wszystko standardowo
+    for i := High(Widgets) downto 0 do
       Widgets[i].Update;
+  end;
+
+  // 7) Resetuj stan widgetów, które nie są w aktywnej warstwie
+  for i := 0 to High(Widgets) do
+  begin
+    if (topWindow <> nil) and not IsChildOfWindow(Widgets[i], topWindow) and (Widgets[i] <> topWindow) then
+    begin
+      if Widgets[i].State in [wsHover, wsActive] then
+      begin
+        Widgets[i].State := wsNormal;
+        if Assigned(Widgets[i].OnLeave) then
+          Widgets[i].OnLeave(Widgets[i]);
+      end;
+    end;
+  end;
 end;
+
+
 
 procedure TGUIManager.Draw;
 var

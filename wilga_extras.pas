@@ -267,7 +267,7 @@ function Raycast(const startPos, dir: TInputVector; maxDist: Double; const solid
 { ==== Scene Manager (stack) ================================================= }
 type
   IScene = interface
-    ['{0A4B0C30-9E8B-4B8A-AD8B-0F3B2D6A9F11}']
+    ['{endefedeend}']
     procedure Enter;
     procedure Exit;
     procedure Update(dt: Double);
@@ -362,6 +362,12 @@ procedure DrawHeartV(center: TVector2; width, height: Double; rotationDeg: Doubl
 
 
 implementation
+
+
+function NormalizeKey(const s: String): String; inline;
+begin
+  Result := Trim(LowerCase(s));
+end;
 
 { ==== Helpers (lokalne) ===================================================== }
 function FloorI(x: Double): Integer; inline; begin Result := Trunc(Floor(x)); end;
@@ -1280,6 +1286,10 @@ begin
   dx := body.vel.x * dt;
   dy := body.vel.y * dt;
 
+  // EPS, aby uniknąć drgań/klejenia się przy bardzo małych przemieszczeniach
+  if Abs(dx) < 1e-9 then dx := 0.0;
+  if Abs(dy) < 1e-9 then dy := 0.0;
+
   // Horizontal
   goal := start.Move(dx, 0);
   for i := 0 to High(solids) do
@@ -1665,7 +1675,15 @@ begin
   Inc(gAssetsGen);
 
   for i := 0 to High(gNamedTex) do
+  begin
     ReleaseTexture(gNamedTex[i].tex);
+    gNamedTex[i].name := '';
+    gNamedTex[i].url := '';
+    gNamedTex[i].tex.canvas := nil;
+    gNamedTex[i].tex.loaded := False;
+    gNamedTex[i].tex.width := 0;
+    gNamedTex[i].tex.height := 0;
+  end;
 
   SetLength(gNamedTex, 0);
 end;
@@ -1703,10 +1721,19 @@ begin
 end;
 
 function GetTextureByName(const name: String): TTexture;
-var i: Integer; dummy: TTexture;
+var i: Integer; dummy: TTexture; key, cur: String;
 begin
+  key := NormalizeKey(name);
+  if key = '' then
+  begin
+    dummy.canvas := nil; dummy.loaded := False; dummy.width := 0; dummy.height := 0;
+    Exit(dummy);
+  end;
   for i := 0 to High(gNamedTex) do
-    if gNamedTex[i].name = name then Exit(gNamedTex[i].tex);
+  begin
+    cur := NormalizeKey(gNamedTex[i].name);
+    if cur = key then Exit(gNamedTex[i].tex);
+  end;
   // fallback pusty
   dummy.canvas := nil; dummy.loaded := False; dummy.width := 0; dummy.height := 0;
   Result := dummy;
@@ -2098,6 +2125,24 @@ begin
 end;
 
 
+
+// --- Cache dla TPerlin, aby nie tworzyć permutacji przy każdym wywołaniu
+var
+  gPerlinCacheSeed: LongInt = 0;
+  gPerlinCacheInited: Boolean = False;
+  gPerlinCache: TPerlin;
+
+function GetPerlin(seed: LongInt): TPerlin;
+begin
+  if (not gPerlinCacheInited) or (seed <> gPerlinCacheSeed) then
+  begin
+    gPerlinCache := TPerlin.Create(seed);
+    gPerlinCacheSeed := seed;
+    gPerlinCacheInited := True;
+  end;
+  Result := gPerlinCache;
+end;
+
 { ==== Perlin Noise implementation ========================================== }
 
 { TXorShift32 }
@@ -2120,7 +2165,7 @@ end;
 
 function TXorShift32.NextFloat: Double;
 begin
-  Result := (NextU32 and $FFFFFF) / $1000000; // [0,1)
+  Result := NextU32 * (1.0/4294967296.0); // [0,1) using full 32 bits
 end;
 
 { TPerlin }
@@ -2283,14 +2328,14 @@ end;
 function PerlinNoise2D(seed: LongInt; x, y, scale: Double): Double;
 var perlin: TPerlin;
 begin
-  perlin := TPerlin.Create(seed);
+  perlin := GetPerlin(seed);
   Result := perlin.Noise2D(x*scale, y*scale);
 end;
 
 function PerlinFBM2D(seed: LongInt; x, y, scale: Double; octaves: Integer; lacunarity, persistence: Double): Double;
 var perlin: TPerlin;
 begin
-  perlin := TPerlin.Create(seed);
+  perlin := GetPerlin(seed);
   Result := perlin.FBM2D(x*scale, y*scale, octaves, lacunarity, persistence);
 end;
 end.

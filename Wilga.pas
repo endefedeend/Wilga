@@ -13,6 +13,9 @@ uses JS, Web, SysUtils, Math;
   gCtx: TJSCanvasRenderingContext2D; 
  
 type
+
+  TLineJoinKind = (ljMiter, ljRound, ljBevel);
+  TLineCapKind  = (lcButt, lcRound, lcSquare);
 TNoArgProc = procedure;
   // ====== PODSTAWOWE TYPY ======
   TColor = record
@@ -80,7 +83,7 @@ TNoArgProc = procedure;
   TRectangle = record
     x, y, width, height: Double;
 
-    // === DODAJ TE LINIE ===
+
     constructor Create(x, y, w, h: Double); inline;
     class function FromCenter(cx, cy, w, h: Double): TRectangle; static; inline;
 
@@ -162,22 +165,26 @@ procedure EndScissor;
 procedure SetLineJoin(const joinKind: String); // 'miter'|'round'|'bevel'
 procedure SetLineCap(const capKind: String);   // 'butt'|'round'|'square'
 
+procedure SetLineJoin(const joinKind: TLineJoinKind); overload;
+procedure SetLineCap(const capKind: TLineCapKind); overload;
+
+
 { ====== RYSOWANIE KSZTAŁTÓW ====== }
 // Poprawione deklaracje procedur
-procedure DrawRectangleRounded(x, y, w, h, radius: Integer; const color: TColor; filled: Boolean = True);
+procedure DrawRectangleRounded(x, y, w, h, radius: double; const color: TColor; filled: Boolean = True);
 procedure DrawRectangleRoundedRec(const rec: TRectangle; radius: Double; const color: TColor; filled: Boolean = True);
 procedure DrawLine(startX, startY, endX, endY: Integer; const color: TColor; thickness: Integer = 1);
 procedure DrawLineV(startPos, endPos: TInputVector; const color: TColor; thickness: Integer = 1);
 procedure DrawTriangle(const tri: TTriangle; const color: TColor; filled: Boolean = True);
 procedure DrawTriangleLines(const tri: TTriangle; const color: TColor; thickness: Integer = 1);
-procedure DrawRectangleLines(x, y, w, h: Integer; const color: TColor; thickness: Integer = 1);
-procedure DrawSquare(x, y, size: Integer; const color: TColor);
-procedure DrawSquareLines(x, y, size: Integer; const color: TColor; thickness: Integer = 1);
-procedure DrawSquareFromCenter(cx, cy, size: Integer; const color: TColor);
-procedure DrawSquareFromCenterLines(cx, cy, size: Integer; const color: TColor; thickness: Integer = 1);
+procedure DrawRectangleLines(x, y, w, h: double; const color: TColor; thickness: Integer = 1);
+procedure DrawSquare(x, y, size: double; const color: TColor);
+procedure DrawSquareLines(x, y, size: double; const color: TColor; thickness: Integer = 1);
+procedure DrawSquareFromCenter(cx, cy, size: double; const color: TColor);
+procedure DrawSquareFromCenterLines(cx, cy, size: double; const color: TColor; thickness: Integer = 1);
 
 // Obrys zaokrąglonego prostokąta z kontrolą grubości
-procedure DrawRectangleRoundedStroke(x, y, w, h, radius: Integer; const color: TColor; thickness: Integer = 1);
+procedure DrawRectangleRoundedStroke(x, y, w, h, radius: double; const color: TColor; thickness: Integer = 1);
 procedure DrawRectangleRoundedRecStroke(const rec: TRectangle; radius: Double; const color: TColor; thickness: Integer = 1);
 
 // Batch obrysów prostokątów
@@ -327,11 +334,11 @@ procedure BeginDrawing;
 procedure EndDrawing;
 procedure ClearBackground(const color: TColor);
 procedure ClearFast(const color: TColor);
-procedure DrawRectangle(x, y, w, h: Integer; const color: TColor);
+procedure DrawRectangle(x, y, w, h: double; const color: TColor);
 procedure DrawRectangleRec(const rec: TRectangle; const color: TColor);
-procedure DrawCircle(cx, cy, radius: Integer; const color: TColor);
-procedure DrawCircleV(center: TInputVector; radius: Integer; const color: TColor);
-procedure DrawCircleLines(cx, cy, radius, thickness: Integer; const color: TColor);
+procedure DrawCircle(cx, cy, radius: double; const color: TColor);
+procedure DrawCircleV(center: TInputVector; radius: double; const color: TColor);
+procedure DrawCircleLines(cx, cy, radius, thickness: double; const color: TColor);
 
 procedure DrawTextWithFont(const text: String; x, y, size: Integer; const family: String; const color: TColor);
 function  MeasureTextWidthWithFont(const text: String; size: Integer; const family: String): Double;
@@ -608,8 +615,7 @@ function COLOR_WHITE: TColor;
 function COLOR_WHITESMOKE: TColor;
 function COLOR_YELLOW: TColor;
 function COLOR_YELLOWGREEN: TColor;
-
-
+function COLOR_TRANSPARENT : TColor;
 
 
   {$ifdef WILGA_DEBUG}
@@ -618,7 +624,7 @@ procedure DebugResetCounters;
 {$endif}
 
 // --- deklaracje (w interface) ---
-procedure WaitTextureReady(const tex: TTexture; const OnReady: TNoArgProc);
+procedure WaitTextureReady(const tex: TTexture; const OnReady, OnTimeout: TNoArgProc; msTimeout: Integer = 10000);
 procedure WaitAllTexturesReady(const arr: array of TTexture; const OnReady: TNoArgProc);
 
 const
@@ -726,8 +732,33 @@ function TRectangleCreate(x, y, w, h: Double): TRectangle; inline;
 
 implementation
 
+
+function LineJoinToStr(k: TLineJoinKind): String; inline;
+begin
+  case k of
+    ljMiter: Result := 'miter';
+    ljRound: Result := 'round';
+  else
+    Result := 'bevel';
+  end;
+end;
+
+function LineCapToStr(k: TLineCapKind): String; inline;
+begin
+  case k of
+    lcButt:   Result := 'butt';
+    lcRound:  Result := 'round';
+  else
+    Result := 'square';
+  end;
+end;
+
 var
   gTimeAccum: Double = 0.0;
+// --- Pixel-snapping kamery ---
+gCamActive: Boolean = False;  // czy jesteśmy wewnątrz BeginMode2D/EndMode2D
+gCamZoom:   Double  = 1.0;    // bieżący zoom kamery (dla snapowania obiektów)
+
 
   // Timing
   gLastTime: Double = 0;
@@ -1235,11 +1266,23 @@ procedure SetLineJoin(const joinKind: String);
 begin
   gCtx.lineJoin := joinKind; // 'miter'|'round'|'bevel'
 end;
+procedure SetLineJoin(const joinKind: TLineJoinKind); overload;
+begin
+  SetLineJoin(LineJoinToStr(joinKind));
+end;
+
+
 
 procedure SetLineCap(const capKind: String);
 begin
   gCtx.lineCap := capKind; // 'butt'|'round'|'square'
 end;
+procedure SetLineCap(const capKind: TLineCapKind); overload;
+begin
+  SetLineCap(LineCapToStr(capKind));
+end;
+
+
 
 // ====== ClearFast: copy composite ======
 procedure ClearFast(const color: TColor);
@@ -1591,9 +1634,9 @@ begin
   gCtx.restore;
 end;
 
-procedure DrawRectangleRounded(x, y, w, h, radius: Integer; const color: TColor; filled: Boolean = True);
+procedure DrawRectangleRounded(x, y, w, h, radius: double; const color: TColor; filled: Boolean = True);
 var
-  maxRadius, halfW, halfH: Integer;
+  maxRadius, halfW, halfH: double;
 begin
   if radius <= 0 then
   begin
@@ -1605,8 +1648,8 @@ begin
   end;
 
   // zamiast Min(w div 2, h div 2):
-  halfW := w shr 1; // to samo co w div 2
-  halfH := h shr 1; // to samo co h div 2
+  halfW := w / 2; // to samo co w div 2
+  halfH := h / 2; // to samo co h div 2
   if halfW < halfH then
     maxRadius := halfW
   else
@@ -1640,7 +1683,7 @@ begin
   DrawRectangleRounded(Round(rec.x), Round(rec.y), Round(rec.width), Round(rec.height), 
                       Round(radius), color, filled);
 end;
-procedure DrawRectangleLines(x, y, w, h: Integer; const color: TColor; thickness: Integer = 1);
+procedure DrawRectangleLines(x, y, w, h: double; const color: TColor; thickness: Integer = 1);
 var off: Double;
 begin
   gCtx.lineWidth := thickness;
@@ -1743,18 +1786,57 @@ begin
 end;
 
 procedure BeginMode2D(const camera: TCamera2D);
+var
+  z, tx, ty, a, b, c_, d, e, f, coss, sinn: Double;
 begin
   gCtx.save;
-  gCtx.translate(camera.offset.x, camera.offset.y);
-  gCtx.rotate(camera.rotation);
-  gCtx.scale(camera.zoom, camera.zoom);
-  gCtx.translate(-camera.target.x, -camera.target.y);
+
+  z := camera.zoom; if z = 0 then z := 1.0;
+
+  // (opcjonalnie) zapamiętaj stan, jeśli gdzieś używasz
+  // gCamActive := True; gCamZoom := z;
+
+  if camera.rotation = 0.0 then
+  begin
+    // M = S(z) + T((-target)*z + offset)
+    tx := -camera.target.x * z + camera.offset.x;
+    ty := -camera.target.y * z + camera.offset.y;
+
+    // pixel-snapping translacji w screen-space
+    {tx := Round(tx);
+    ty := Round(ty);}
+
+    gCtx.setTransform(z, 0, 0, z, tx, ty);
+  end
+  else
+  begin
+    // M = T(offset) * R(rot) * S(z) * T(-target)
+    coss := Cos(camera.rotation);
+    sinn := Sin(camera.rotation);
+
+    a :=  coss * z;   b :=  sinn * z;
+    c_ := -sinn * z;  d :=  coss * z;
+
+    tx := -camera.target.x;
+    ty := -camera.target.y;
+
+    // ostateczna translacja w screen-space:
+    e := camera.offset.x + (a * tx + c_ * ty);
+    f := camera.offset.y + (b * tx + d * ty);
+
+    {// snap translacji (przy rotacji to best-effort)
+    e := Round(e); f := Round(f);
+
+    gCtx.setTransform(a, b, c_, d, e, f);}
+  end;
 end;
 
 procedure EndMode2D;
 begin
   gCtx.restore;
+  // gCamActive := False;
 end;
+
 
 function ScreenToWorld(p: TVector2; const cam: TCamera2D): TVector2;
 var mat: TMatrix2D;
@@ -1907,20 +1989,26 @@ begin
       ctx.drawImage(img, 0, 0);
       tex.loaded := True;
       {$ifdef WILGA_DEBUG} DBG_Inc(dbg_TexturesAlive); {$endif}
-
       if Assigned(OnReady) then OnReady(tex);
     end
   );
 
+  // 🔧 POPRAWIONY onerror:
   img.onerror := TJSErrorEventHandler(
     procedure (event: TJSErrorEvent)
     begin
       console.warn('LoadImageFromURL failed: ' + url);
+      tex.canvas := nil;
+      tex.width := 0;
+      tex.height := 0;
+      tex.loaded := False;
+      if Assigned(OnReady) then OnReady(tex); // ← callback przy błędzie
     end
   );
 
   img.src := url;
 end;
+
 
 function  LoadImageFromURL(const url: String): TTexture; overload;
 var
@@ -2004,7 +2092,7 @@ var
 begin
   src := RectangleCreate(0, 0, tex.width, tex.height);
   dst := RectangleCreate(position.x, position.y, tex.width * scale, tex.height * scale);
-  origin := Vector2Create(dst.width / 2, dst.height / 2);
+  origin := Vector2Create(0,0);
   DrawTexturePro(tex, src, dst, origin, rotation, tint);
 end;
 
@@ -2183,88 +2271,98 @@ end;
 procedure DrawTexturePro(const tex: TTexture; const src, dst: TRectangle;
   origin: TVector2; rotationDeg: Double; const tint: TColor);
 var
-  savedAlpha: Double;
   sx, sy, sw, sh: Double;
-  needsColorTint: Boolean;
+  savedAlpha: Double;
   oldComp: String;
+  useTint: Boolean;
 begin
-  if (tex.canvas = nil) or (tex.width = 0) or (tex.height = 0) then Exit;
+  if (tex.canvas = nil) or (tex.width <= 0) or (tex.height <= 0) then Exit;
 
+  // Normalizacja źródła (pozwala na ujemne width/height = odwrócenie)
   sx := src.x; sy := src.y; sw := src.width; sh := src.height;
   if sh < 0 then begin sy := sy + sh; sh := -sh; end;
   if sw < 0 then begin sx := sx + sw; sw := -sw; end;
 
-  needsColorTint := not ((tint.r = 255) and (tint.g = 255) and (tint.b = 255));
+  useTint := not ((tint.r = 255) and (tint.g = 255) and (tint.b = 255));
 
-  // FAST PATH (brak rotacji, origin (0,0), brak koloru – sama alfa)
-  if (rotationDeg = 0) and (origin.x = 0) and (origin.y = 0) and (not needsColorTint) then
-  begin
-    savedAlpha := gCtx.globalAlpha;
-    gCtx.globalAlpha := savedAlpha * (tint.a / 255.0);
-    gCtx.drawImage(tex.canvas, sx, sy, sw, sh, dst.x, dst.y, dst.width, dst.height);
-    gCtx.globalAlpha := savedAlpha;
-    Exit;
-  end;
+  // --- WSPÓLNY BLOK TRANSFORMACJI ---
+  // ZASADA: po transformacjach punkt (0,0) ma leżeć w miejscu KOTWICY,
+  // a lewy-górny róg obrazka rysujemy w (-origin.x, -origin.y).
+  gCtx.save;
 
-  if needsColorTint then
+  // (opcjonalnie) kamera – użyj JEŚLI ją masz (zamiast kombinować w drawImage)
+  // Przykład: gCtx.translate(-gCamX, -gCamY);
+
+  // świat: przenosimy układ na punkt dst.x, dst.y (pozycja KOTWICY)
+  gCtx.translate(dst.x, dst.y);
+
+  // obrót wokół kotwicy
+  if rotationDeg <> 0 then
+    gCtx.rotate(DegToRad(rotationDeg));
+
+  // --- TINT / ALFA ---
+  savedAlpha := gCtx.globalAlpha;
+  gCtx.globalAlpha := savedAlpha * (tint.a / 255.0);
+
+  if useTint then
   begin
     EnsureTintCanvas(Round(sw), Round(sh));
-    // wyczyść
+    // wyczyść offscreen
     gTintCtx.clearRect(0, 0, gTintCanvas.width, gTintCanvas.height);
-    // 1) wypełnij kolorem tint
+
+    // 1) wypełnij kolorem
     gTintCtx.fillStyle := 'rgb(' + IntToStr(tint.r) + ',' + IntToStr(tint.g) + ',' + IntToStr(tint.b) + ')';
-    gTintCtx.fillRect(0, 0, gTintCanvas.width, gTintCanvas.height);
-    // 2) pomnóż przez obraz (multiply)
+    gTintCtx.fillRect(0, 0, sw, sh);
+
+    // 2) multiply obraz
     oldComp := gTintCtx.globalCompositeOperation;
     gTintCtx.globalCompositeOperation := 'multiply';
     gTintCtx.drawImage(tex.canvas, sx, sy, sw, sh, 0, 0, sw, sh);
-    // 3) zachowaj alfa oryginalu (destination-in)
+
+    // 3) destination-in: maska alfa oryginału
     gTintCtx.globalCompositeOperation := 'destination-in';
     gTintCtx.drawImage(tex.canvas, sx, sy, sw, sh, 0, 0, sw, sh);
+
+    // restore blend mode
     gTintCtx.globalCompositeOperation := oldComp;
 
-    // Teraz rysujemy już gotowy ofscreen
-    gCtx.save;
-    gCtx.translate(dst.x + origin.x, dst.y + origin.y);
-    gCtx.rotate(DegToRad(rotationDeg));
-    savedAlpha := gCtx.globalAlpha;
-    gCtx.globalAlpha := savedAlpha * (tint.a / 255.0);
+    // RYSUJEMY KOLOROWANY OFFSCREEN — względem ORIGINU
     gCtx.drawImage(gTintCanvas, 0, 0, sw, sh, -origin.x, -origin.y, dst.width, dst.height);
-    gCtx.globalAlpha := savedAlpha;
-    gCtx.restore;
   end
   else
   begin
-    // tylko alfa + transform
-    gCtx.save;
-    gCtx.translate(dst.x + origin.x, dst.y + origin.y);
-    gCtx.rotate(DegToRad(rotationDeg));
-
-    savedAlpha := gCtx.globalAlpha;
-    gCtx.globalAlpha := savedAlpha * (tint.a / 255.0);
-
+    // BEZ TINTU: ten sam układ współrzędnych, ten sam offset względem ORIGINU
     gCtx.drawImage(tex.canvas, sx, sy, sw, sh, -origin.x, -origin.y, dst.width, dst.height);
-
-    gCtx.globalAlpha := savedAlpha;
-    gCtx.restore;
   end;
+
+  // restore
+  gCtx.globalAlpha := savedAlpha;
+  gCtx.restore;
 end;
+
 
 function TextureIsReady(const tex: TTexture): Boolean;
 begin
   Result := tex.loaded and (tex.width>0) and (tex.height>0) and (tex.canvas<>nil);
 end;
-procedure WaitTextureReady(const tex: TTexture; const OnReady: TNoArgProc);
-  procedure Check(ts: Double); // RAF podaje znacznik czasu; można go zignorować
+procedure WaitTextureReady(const tex: TTexture; const OnReady, OnTimeout: TNoArgProc; msTimeout: Integer = 10000);
+var
+  t0: Double;
+  procedure Check(ts: Double);
   begin
-    if tex.loaded and (tex.width > 0) and (tex.height > 0) and (tex.canvas <> nil) then
+    if TextureIsReady(tex) then
     begin
       if Assigned(OnReady) then OnReady();
+    end
+    else if (window.performance.now - t0) >= msTimeout then
+    begin
+      if Assigned(OnTimeout) then OnTimeout();
     end
     else
       window.requestAnimationFrame(@Check);
   end;
 begin
+  t0 := window.performance.now;
   window.requestAnimationFrame(@Check);
 end;
 
@@ -3090,7 +3188,7 @@ begin
   gCtx.fillRect(0, 0, Wcss, Hcss);
 end;
 
-procedure DrawRectangle(x, y, w, h: Integer; const color: TColor);
+procedure DrawRectangle(x, y, w, h: double; const color: TColor);
 begin
   gCtx.fillStyle := ColorToCanvasRGBA(color);
   gCtx.fillRect(x, y, w, h);
@@ -3107,10 +3205,12 @@ end;
 
 procedure DrawRectangleRec(const rec: TRectangle; const color: TColor);
 begin
-  DrawRectangle(Round(rec.x), Round(rec.y), Round(rec.width), Round(rec.height), color);
+  gCtx.fillStyle := ColorToCanvasRGBA(color);
+  gCtx.fillRect(rec.x, rec.y, rec.width, rec.height);  // bez Round!
 end;
 
-procedure DrawCircle(cx, cy, radius: Integer; const color: TColor);
+
+procedure DrawCircle(cx, cy, radius: double; const color: TColor);
 begin
   gCtx.beginPath;
   gCtx.arc(cx, cy, radius, 0, 2 * Pi);
@@ -3118,7 +3218,7 @@ begin
   gCtx.fill;
 end;
 
-procedure DrawCircleLines(cx, cy, radius, thickness: Integer; const color: TColor);
+procedure DrawCircleLines(cx, cy, radius, thickness: double; const color: TColor);
 begin
   gCtx.beginPath;
   gCtx.arc(cx, cy, radius, 0, 2 * Pi);
@@ -3126,10 +3226,23 @@ begin
   gCtx.strokeStyle := ColorToCanvasRGBA(color);
   gCtx.stroke;
 end;
-procedure DrawCircleV(center: TInputVector; radius: Integer; const color: TColor);
+procedure DrawCircleV(center: TInputVector; radius: double; const color: TColor);
 begin
-  DrawCircle(Round(center.x), Round(center.y), radius, color);
+  if Assigned(gCtx) then
+  begin
+    // rysuj w world-space na floatach — transform (BeginMode2D) zrobi resztę
+    gCtx.beginPath;
+    gCtx.arc(center.x, center.y, radius, 0, 2 * Pi);
+    gCtx.fillStyle := ColorToCanvasRGBA(color);
+    gCtx.fill;
+  end
+  else
+  begin
+    // awaryjnie (bez kontekstu) nic nie rób albo użyj DrawCircle
+  end;
 end;
+
+
 
 procedure DrawEllipse(cx, cy, rx, ry: Integer; const color: TColor);
 begin
@@ -3988,40 +4101,40 @@ function COLOR_WHITE: TColor; begin Result := ColorRGBA(255, 255, 255, 255); end
 function COLOR_WHITESMOKE: TColor; begin Result := ColorRGBA(245, 245, 245, 255); end;
 function COLOR_YELLOW: TColor; begin Result := ColorRGBA(255, 255, 0, 255); end;
 function COLOR_YELLOWGREEN: TColor; begin Result := ColorRGBA(154, 205, 50, 255); end;
-
+function COLOR_TRANSPARENT : TColor; begin Result := ColorRGBA(0, 0, 0, 0); end;
 
 // ====== DODATKOWE POMOCNICZE PROCEDURY – KWADRATY I OBRYSY ======
 
-procedure DrawSquare(x, y, size: Integer; const color: TColor);
+procedure DrawSquare(x, y, size: double; const color: TColor);
 begin
   DrawRectangle(x, y, size, size, color);
 end;
 
-procedure DrawSquareLines(x, y, size: Integer; const color: TColor; thickness: Integer = 1);
+procedure DrawSquareLines(x, y, size: double; const color: TColor; thickness: Integer = 1);
 begin
   DrawRectangleLines(x, y, size, size, color, thickness);
 end;
 
-procedure DrawSquareFromCenter(cx, cy, size: Integer; const color: TColor);
+procedure DrawSquareFromCenter(cx, cy, size: double; const color: TColor);
 var
-  x, y: Integer;
+  x, y: double;
 begin
-  x := cx - (size div 2);
-  y := cy - (size div 2);
+  x := cx - (size / 2);
+  y := cy - (size / 2);
   DrawRectangle(x, y, size, size, color);
 end;
 
-procedure DrawSquareFromCenterLines(cx, cy, size: Integer; const color: TColor; thickness: Integer = 1);
+procedure DrawSquareFromCenterLines(cx, cy, size: double; const color: TColor; thickness: Integer = 1);
 var
-  x, y: Integer;
+  x, y: double;
 begin
-  x := cx - (size div 2);
-  y := cy - (size div 2);
+  x := cx - (size / 2);
+  y := cy - (size / 2);
   DrawRectangleLines(x, y, size, size, color, thickness);
 end;
 
 // Obrys zaokrąglonego prostokąta z kontrolą grubości
-procedure DrawRectangleRoundedStroke(x, y, w, h, radius: Integer; const color: TColor; thickness: Integer = 1);
+procedure DrawRectangleRoundedStroke(x, y, w, h, radius: double; const color: TColor; thickness: Integer = 1);
 begin
   gCtx.lineWidth := thickness;
   DrawRectangleRounded(x, y, w, h, radius, color, False);
