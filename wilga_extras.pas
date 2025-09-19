@@ -21,9 +21,13 @@ unit wilga_extras;
 interface
 
 uses JS, Web, SysUtils, Math, wilga;
+const 
+ DEG2RAD = Pi / 180.0;
+  RAD2DEG = 180.0 / Pi;
+
  var
   gCrossFading :boolean= False;
-
+  gCrossFadeSeq: Cardinal = 0;     // licznik sekwencji crossfadu
 { ==== Perlin Noise (2D/3D + FBM) =========================================== }
 type
   { Prosty PRNG (xorshift32) dla powtarzalnych wyników }
@@ -48,6 +52,7 @@ type
     function FBM2D(x, y: Double; octaves: Integer = 4; lacunarity: Double = 2.0; persistence: Double = 0.5): Double;
   end;
 procedure AssetsFree;
+procedure AssetFreeByName(const name: String);
 
 { Mapowanie [-1,1] -> [0,1] }
 function Normalize01(v: Double): Double; inline;
@@ -338,7 +343,8 @@ procedure DrawTextTypewriter(const text: String; pos: TVector2; fontSize: Intege
 procedure DrawTextWave(const text: String; pos: TVector2; fontSize: Integer; const color: TColor; time: Double; amplitude, speed: Double);
 
 // Efekt "pulsowanie" (scale pulse)
-procedure DrawTextPulse(const text: String; pos: TVector2; fontSize: Integer; const color: TColor; time: Double; pulseSpeed, pulseAmount: Double);
+procedure DrawTextPulseRange(const text: String; const pos: TVector2;
+  startSize, endSize: Longint; const color: TColor; time: Double; speed: Double = 4.0);
 
 
 // Tekst z wypełnieniem teksturą
@@ -359,7 +365,11 @@ procedure DrawHeart(cx, cy: Double; width, height: Double; rotationDeg: Double;
 procedure DrawHeartV(center: TVector2; width, height: Double; rotationDeg: Double;
   const color: TColor; filled: Boolean = True; thickness: Integer = 1; samples: Integer = 120);
 
-
+function Clamp01(x: Double): Double; inline;
+function ColorAlpha(const C: TColor; Alpha: Double): TColor; inline;
+function Fade(const C: TColor; Alpha: Double): TColor; inline;
+function DegtoRad(const A: Double): Double; inline;
+function RadtoDeg(const A: Double): Double; inline;
 
 implementation
 
@@ -1687,6 +1697,23 @@ begin
 
   SetLength(gNamedTex, 0);
 end;
+procedure AssetFreeByName(const name: String);
+var i: Integer; key, cur: String;
+begin
+  key := Trim(LowerCase(name));
+  for i := 0 to High(gNamedTex) do
+  begin
+    cur := Trim(LowerCase(gNamedTex[i].name));
+    if cur = key then
+    begin
+      ReleaseTexture(gNamedTex[i].tex);
+      gNamedTex[i].ready := False;
+      gNamedTex[i].url   := '';
+      gNamedTex[i].name  := '';
+      Exit;
+    end;
+  end;
+end;
 
 procedure DrawTextTextureFill(const text: String; pos: TVector2; fontSize: Integer; const tex: TTexture);
 var
@@ -1860,11 +1887,11 @@ var
   getterOld: TDoubleGetter; setterOld: TDoubleSetter;
   getterNew: TDoubleGetter; setterNew: TDoubleSetter;
   targetNew: Double;
+  mySeq: Cardinal;
 begin
   if time < 0 then time := 0;
-  if gCrossFading then Exit;            // anty-reentrancy (proste, globalne)
 
-  // jeśli czas ~0: ustaw docelowe wartości i zatrzymaj old
+  // natychmiastowy przełącznik
   if time = 0 then
   begin
     SetSoundVolume(oldH, 0.0);
@@ -1874,30 +1901,25 @@ begin
     Exit;
   end;
 
-  gCrossFading := True;
+  // nowa sekwencja crossfadu „anuluje” poprzednią
+  Inc(gCrossFadeSeq);
+  mySeq := gCrossFadeSeq;
 
-  // znajdź rejestry (mogą nie istnieć)
   idxOld := FindSoundReg(oldH);
   idxNew := FindSoundReg(newH);
 
-  // (opcjonalnie) ubij istniejące tweeny związane z tymi uchwytami
-  // Jeśli masz takie API:
-  //   TweenKillByHandle(oldH);
-  //   TweenKillByHandle(newH);
-
-  // przygotuj nowy: od 0, play, loop wg rejestru
+  // przygotuj nowy: start z 0 i graj
   if idxNew >= 0 then
     gSoundRegs[idxNew].curVol := 0.0;
   SetSoundVolume(newH, 0.0);
   AudioPlay(newH);
 
-  // policz target wg aktualnych grup (Master/Music)
+  // docelowa efektywna głośność nowego
   if idxNew >= 0 then
-    targetNew := EffectiveVolume(gSoundRegs[idxNew])   // bazowa curVol*grupy
+    targetNew := EffectiveVolume(gSoundRegs[idxNew])
   else
-    targetNew := 1.0;                                   // fallback
+    targetNew := 1.0;
 
-  // OLD getters/setters
   getterOld := function: Double
   begin
     if idxOld >= 0 then Result := gSoundRegs[idxOld].curVol else Result := 1.0;
@@ -1910,7 +1932,6 @@ begin
     SetSoundVolume(oldH, v);
   end;
 
-  // NEW getters/setters
   getterNew := function: Double
   begin
     if idxNew >= 0 then Result := gSoundRegs[idxNew].curVol else Result := 0.0;
@@ -1923,19 +1944,21 @@ begin
     SetSoundVolume(newH, v);
   end;
 
-  // uruchom tweeny (liniowe). Jeśli masz ease equal-power, możesz podmienić:
-  //   easeLinear -> easeSinInOut i odpowiednio skalować.
+  // fade-out starego (z warunkiem sekwencji)
   TweenValue(getterOld, setterOld, 0.0, time, easeLinear,
     procedure
     begin
-      // Zatrzymaj na końcu nawet jeśli rejestr się zmienił
-      SetSoundVolume(oldH, 0.0);
-      StopSoundEx(oldH);
-      gCrossFading := False;
+      if mySeq = gCrossFadeSeq then
+      begin
+        SetSoundVolume(oldH, 0.0);
+        StopSoundEx(oldH);
+      end;
     end);
 
+  // fade-in nowego
   TweenValue(getterNew, setterNew, targetNew, time, easeLinear);
 end;
+
 
 { ==== Debug overlay ========================================================= }
 procedure DebugToggle;
@@ -1983,35 +2006,79 @@ begin
   DrawText(Copy(text, 1, visibleChars), Round(pos.x), Round(pos.y), fontSize, color);
 end;
 
-// Efekt "fala" (wave)
-procedure DrawTextWave(const text: String; pos: TVector2; fontSize: Integer; const color: TColor; time: Double; amplitude, speed: Double);
+procedure DrawTextWave(const text: String; pos: TVector2; fontSize: Integer;
+  const color: TColor; time: Double; amplitude, speed: Double);
 var
-  i: Integer;
-  x, y: Double;
-  ch: String;
+  i        : Integer;
+  x, y     : Double;
+  ch       : String;
+  effSize  : Longint;
 begin
+  // 0 => użyj bieżącego globalnego rozmiaru
+  if fontSize > 0 then
+    effSize := fontSize
+  else
+    effSize := GFontSize;
+
+  if effSize < 1 then
+    effSize := 1;
+
+  // Jeśli podano fontSize > 0, ustawiamy go globalnie (Wilga używa GFontSize)
+  if (fontSize > 0) and (GFontSize <> effSize) then
+    EnsureFont(effSize);
+
   x := pos.x;
   for i := 1 to Length(text) do
   begin
-    y := pos.y + Sin(time * speed + i * 0.5) * amplitude;
+    y  := pos.y + Sin(time * speed + i * 0.5) * amplitude;
     ch := text[i];
-    DrawText(ch, Round(x), Round(y), fontSize, color);
-    x += MeasureTextWidth(ch, fontSize);
+
+    // Rysujemy i mierzymy w tym samym, efektywnym rozmiarze
+    DrawText(ch, Round(x), Round(y), effSize, color);
+    x += MeasureTextWidth(ch, effSize);
   end;
 end;
 
 // Efekt "pulsowanie"
-procedure DrawTextPulse(const text: String; pos: TVector2; fontSize: Integer; const color: TColor; time: Double; pulseSpeed, pulseAmount: Double);
+procedure DrawTextPulseRange(const text: String; const pos: TVector2;
+  startSize, endSize: Longint; const color: TColor; time: Double; speed: Double = 4.0);
 var
-  scale: Double;
-  w: Double;
+  a, b: Longint;
+  t01, s: Double;
+  sizePx, oldSize, x, y: Longint;
 begin
-  scale := 1.0 + Sin(time * pulseSpeed) * pulseAmount;
-  w := MeasureTextWidth(text, Round(fontSize * scale));
-  DrawText(text, Round(pos.x - w / 2), Round(pos.y), Round(fontSize * scale), color);
+  // 1) Ustal poprawne wartości rozmiarów (nie mniejsze niż 1)
+  a := startSize; if a < 1 then a := 1;
+  b := endSize;   if b < 1 then b := 1;
+
+  // Jeśli ktoś poda odwrotnie (end < start), zamień
+  if b < a then begin
+    sizePx := a; a := b; b := sizePx;
+  end;
+
+  if speed <= 0 then speed := 4.0; // domyślna prędkość
+
+  // 2) Sinusoidalne przejście w zakresie [0..1]
+  t01 := 0.5 + 0.5 * Sin(time * speed * 2 * PI);
+
+  // 3) Interpolacja między rozmiarem początkowym i końcowym
+  s := a + (b - a) * t01;
+  sizePx := Longint(Round(s));
+  if sizePx < 1 then sizePx := 1;
+
+  // 4) Ustaw font tylko na czas rysowania
+  oldSize := GFontSize;
+  if oldSize <> sizePx then
+    EnsureFont(sizePx);
+
+  x := Longint(Round(pos.x));
+  y := Longint(Round(pos.y));
+  DrawText(text, x, y, sizePx, color);
+
+  if oldSize <> sizePx then
+    EnsureFont(oldSize);
 end;
 
-// Tekst z wypełnieniem teksturą
 
 
 
@@ -2338,4 +2405,36 @@ begin
   perlin := GetPerlin(seed);
   Result := perlin.FBM2D(x*scale, y*scale, octaves, lacunarity, persistence);
 end;
+function Clamp01(x: Double): Double; inline;
+begin
+  if x < 0 then Exit(0) else
+  if x > 1 then Exit(1) else Exit(x);
+end;
+
+function ColorAlpha(const C: TColor; Alpha: Double): TColor; inline;
+var outC: TColor; aMul: Integer;
+begin
+  Alpha := Clamp01(Alpha);
+  outC := C;
+  aMul := Round(outC.a * Alpha);      // raylib: mnożenie alphy
+  if aMul < 0 then aMul := 0 else if aMul > 255 then aMul := 255;
+  outC.a := aMul;
+  Result := outC;
+end;
+
+function Fade(const C: TColor; Alpha: Double): TColor; inline;
+begin
+  Result := ColorAlpha(C, Alpha);
+end;
+function DegtoRad(const A: Double): Double; inline;
+begin
+  Result := A * DEG2RAD;
+end;
+
+function RadtoDeg(const A: Double): Double; inline;
+begin
+  Result := A * RAD2DEG;
+end;
+
+
 end.

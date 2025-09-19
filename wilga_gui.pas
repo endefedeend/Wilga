@@ -105,21 +105,30 @@ type
 
   { ---------- TextBox (focus/blur only, no typing) ---------- }
   TTextBox = class(TWidget)
-  public
-    Text: String;
-    Placeholder: String;
-    Color: TColor;
-    TextColor: TColor;
-    FontSize: Integer;
-    MaxLength: Integer;
-    OnTextChange: TWidgetCallback;
-    OnEnterPressed: TWidgetCallback;
+public
+  Text: String;
+  Placeholder: String;
+  Color: TColor;
+  TextColor: TColor;
+  FontSize: Integer;
+  MaxLength: Integer;
+  OnTextChange: TWidgetCallback;
+  OnEnterPressed: TWidgetCallback;
+  CaretPos: Integer;
+  CaretBlink: Double;
+  ShowCaret: Boolean;
+  BackspaceHeld: Boolean;
+  LastBackspaceTime:  double;
 
-    procedure Draw; override;
-    procedure Update; override;
-    procedure Focus;
-    procedure Blur;
-  end;
+constructor Create(ax, ay, aw, ah: Double); override;
+
+
+  procedure Draw; override;
+  procedure Update; override;
+  procedure Focus;
+  procedure Blur;
+end;
+
 
   TProgressBar = class(TWidget)
   public
@@ -492,7 +501,16 @@ begin
   y := Round(pos.y);
 
   if WordWrap then
-    DrawTextBoxed(Text, NewVector(Bounds.x, Bounds.y), Round(Bounds.width), FontSize, Color, 5)
+    DrawTextBoxed(
+  Text,
+  NewVector(Bounds.x, Bounds.y),
+  Round(Bounds.width),
+  FontSize,
+  Color,
+  5,
+  COLOR_Red,
+  3
+)
   else
   begin
     if Align = 'left' then
@@ -631,6 +649,7 @@ procedure TTextBox.Draw;
 var
   textToDraw: String;
   textX, textY: Integer;
+  caretX, topY, bottomY: Integer;
 begin
   if not Visible then Exit;
 
@@ -652,25 +671,228 @@ begin
   textX := Round(Bounds.x + 6);
   textY := Round(Bounds.y + Bounds.height/2 - (FontSize div 2));
   DrawText(textToDraw, textX, textY, FontSize, TextColor);
+
+  // caret blinking + draw
+  if State = wsFocused then
+  begin
+    CaretBlink := CaretBlink + GetDeltaTime;
+    if CaretBlink >= 0.5 then
+    begin
+      ShowCaret := not ShowCaret;
+      CaretBlink := 0.0;
+    end;
+    if ShowCaret then
+    begin
+      if CaretPos < 0 then CaretPos := 0;
+      if CaretPos > Length(Text) then CaretPos := Length(Text);
+       caretX := textX + Round(MeasureTextWidth(Copy(Text,1,CaretPos), FontSize));
+       topY := textY;
+      bottomY := textY + FontSize;
+      DrawLine(caretX, topY, caretX, bottomY, COLOR_BLACK, 1);
+    end;
+  end;
+
+end;
+constructor TTextBox.Create(ax, ay, aw, ah: Double);
+begin
+  inherited Create(ax, ay, aw, ah);
+  Text := '';
+  Placeholder := '';
+  Color := color_White;
+  TextColor := color_black;
+  FontSize := 12;
+  MaxLength := 0;
+  CaretPos := 0;
+  CaretBlink := 0.0;
+  ShowCaret := True;
+  BackspaceHeld := False;
+  LastBackspaceTime := Gettime;
 end;
 
+
 procedure TTextBox.Update;
+  function CodeToChar(const code: String; shiftOn: Boolean): String;
+  var last: Char;
+  begin
+    Result := '';
+
+    // Litery KeyA..KeyZ
+    if (Length(code) = 4) and (Copy(code, 1, 3) = 'Key') then
+    begin
+      Result := Copy(code, 4, 1); // 'A'..'Z'
+      if shiftOn then Result := UpperCase(Result)
+                 else Result := LowerCase(Result);
+      Exit;
+    end;
+
+    // Cyfry Digit0..Digit9
+    if (Copy(code, 1, 5) = 'Digit') and (Length(code) = 6) then
+    begin
+      Result := Copy(code, 6, 1);
+      Exit;
+    end;
+
+    // Numpad0..Numpad9
+    if (Copy(code, 1, 6) = 'Numpad') and (Length(code) = 7) then
+    begin
+      last := code[7];
+      if (last >= '0') and (last <= '9') then
+        Result := last;
+      Exit;
+    end;
+
+    // Spacja
+    if (code = 'Space') then
+    begin
+      Result := ' ';
+      Exit;
+    end;
+
+    // Prosta interpunkcja z klawiatury US
+    if code = 'Minus'        then Exit('-');
+    if code = 'Equal'        then Exit('=');
+    if code = 'Comma'        then Exit(',');
+    if code = 'Period'       then Exit('.');
+    if code = 'Slash'        then Exit('/');
+    if code = 'Semicolon'    then Exit(';');
+    if code = 'Quote'        then Exit('''');
+    if code = 'BracketLeft'  then Exit('[');
+    if code = 'BracketRight' then Exit(']');
+    if code = 'Backslash'    then Exit('\');
+  end;
+
+const
+  BACKSPACE_REPEAT_DELAY = 0.1; // sekundy (100 ms)
+
 var
   mp: TInputVector;
+  k, ch, leftPart, rightPart: String;
+  shiftOn: Boolean;
 begin
-  inherited Update;
-  mp := GetMousePosition;
+  if not Visible then Exit;
 
-  // fokus na press; blur robi globalnie GUIManager
+  // Hover/leave
+  mp := GetMousePosition;
+  if ContainsPoint(mp) then
+  begin
+    if State = wsNormal then State := wsHover;
+    if Assigned(OnHover) then OnHover(Self);
+  end
+  else
+  begin
+    if (State <> wsNormal) and (State <> wsFocused) then State := wsNormal;
+    if Assigned(OnLeave) then OnLeave(Self);
+  end;
+
+  // Fokus po kliknięciu; blur robi GUIManager
   if IsMouseButtonPressed(0) and ContainsPoint(mp) then
     Focus;
+
+  // Klawiatura tylko gdy fokus
+  if (State = wsFocused) then
+  begin
+    shiftOn := IsKeyDown('ShiftLeft') or IsKeyDown('ShiftRight');
+
+    k := GetKeyPressed;
+    while k <> '' do
+    begin
+      if (k = 'Backspace') then
+      begin
+        if (CaretPos > 0) and (Length(Text) > 0) then
+        begin
+          leftPart  := Copy(Text, 1, CaretPos-1);
+          rightPart := Copy(Text, CaretPos+1, Length(Text) - CaretPos);
+          Text := leftPart + rightPart;
+          Dec(CaretPos);
+          if Assigned(OnTextChange) then OnTextChange(Self);
+        end;
+        LastBackspaceTime := GetTime; // reset licznika przy pojedynczym backspace
+      end
+      else if (k = 'Delete') then
+      begin
+        if (CaretPos < Length(Text)) then
+        begin
+          leftPart  := Copy(Text, 1, CaretPos);
+          rightPart := Copy(Text, CaretPos+2, Length(Text) - (CaretPos+1));
+          Text := leftPart + rightPart;
+          if Assigned(OnTextChange) then OnTextChange(Self);
+        end;
+      end
+      else if (k = 'Enter') then
+      begin
+        if Assigned(OnEnterPressed) then OnEnterPressed(Self);
+      end
+      else if (k = 'ArrowLeft') or (k = 'Left') then
+      begin
+        if CaretPos > 0 then Dec(CaretPos);
+      end
+      else if (k = 'ArrowRight') or (k = 'Right') then
+      begin
+        if CaretPos < Length(Text) then Inc(CaretPos);
+      end
+      else if (k = 'Home') then
+        CaretPos := 0
+      else if (k = 'End') then
+        CaretPos := Length(Text)
+      else
+      begin
+        // --- mapowanie kodu klawisza na znak ---
+        ch := CodeToChar(k, shiftOn);
+        if (ch <> '') and ((MaxLength = 0) or (Length(Text) < MaxLength)) then
+        begin
+          leftPart  := Copy(Text, 1, CaretPos);
+          rightPart := Copy(Text, CaretPos+1, Length(Text) - CaretPos);
+          Text := leftPart + ch + rightPart;
+          Inc(CaretPos);
+          if Assigned(OnTextChange) then OnTextChange(Self);
+        end;
+      end;
+
+      // reset migania po naciśnięciu klawisza
+      ShowCaret := True;
+      CaretBlink := 0.0;
+
+      // pobierz następny klawisz z kolejki
+      k := GetKeyPressed;
+    end;
+
+    // --- Ciągłe usuwanie przy trzymanym Backspace ---
+    if IsKeyDown('Backspace') then
+    begin
+      if (GetTime - LastBackspaceTime > BACKSPACE_REPEAT_DELAY) then
+      begin
+        if (CaretPos > 0) and (Length(Text) > 0) then
+        begin
+          leftPart  := Copy(Text, 1, CaretPos-1);
+          rightPart := Copy(Text, CaretPos+1, Length(Text) - CaretPos);
+          Text := leftPart + rightPart;
+          Dec(CaretPos);
+          if Assigned(OnTextChange) then OnTextChange(Self);
+        end;
+        LastBackspaceTime := GetTime;
+      end;
+    end;
+
+    // Blink kursora
+    CaretBlink := CaretBlink + GetDeltaTime;
+    if CaretBlink > 0.5 then
+    begin
+      CaretBlink := 0;
+      ShowCaret := not ShowCaret;
+    end;
+  end;
 end;
 
 procedure TTextBox.Focus;
 begin
   State := wsFocused;
   GUI.FocusedWidget := Self;
+  // inicjalizacja caret
+  CaretPos := Length(Text);
+  CaretBlink := 0.0;
+  ShowCaret := True;
 end;
+
 
 procedure TTextBox.Blur;
 begin

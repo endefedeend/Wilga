@@ -11,7 +11,8 @@ uses JS, Web, SysUtils, Math;
 
  var
   gCtx: TJSCanvasRenderingContext2D; 
- 
+  GFontSize: Integer;
+   GFontFamily: String = 'system-ui, sans-serif';
 type
 
   TLineJoinKind = (ljMiter, ljRound, ljBevel);
@@ -351,6 +352,11 @@ procedure SetTextAlign(const hAlign: String; const vAlign: String);
 procedure DrawTextCentered(const text: String; cx, cy, size: Integer; const color: TColor);
 procedure DrawTextPro(const text: String; x, y, size: Integer; const color: TColor;
                      rotation: Double; originX, originY: Double);
+procedure ApplyFont;
+function BuildFontString(const sizePx: Integer; const family: String = ''): String;
+procedure EnsureFont(const sizePx: Integer; const family: String = ''); 
+procedure SetFontSize(const sizePx: Integer); 
+procedure SetFontFamily(const family: String);                 
 // === Tekstury ===
 
 // Rysowanie z pozycją, skalą, rotacją i tintem
@@ -387,8 +393,9 @@ procedure DrawTextOutline(const text: String; pos: TVector2; fontSize: Integer; 
 procedure DrawTextShadow(const text: String; pos: TVector2; fontSize: Integer; const color, shadowColor: TColor; shadowOffset: TVector2);
 
 // Tekst w ramce (word wrap)
-procedure DrawTextBoxed(const text: String; pos: TVector2; boxWidth: Integer; fontSize: Integer; const color: TColor; lineSpacing: Integer);
-
+procedure DrawTextBoxed(const text: String; pos: TVector2; boxWidth: Integer;
+  fontSize: Integer; const textColor: TColor; lineSpacing: Integer;
+  const borderColor: TColor; borderThickness: Integer);
 // Tekst na okręgu
 procedure DrawTextOnCircle(const text: String; center: TVector2; radius: Double; startAngle: Double; fontSize: Integer; const color: TColor);
 
@@ -464,6 +471,12 @@ procedure UpdateParticles(particleSystem: TParticleSystem; dt: Double);
 { ====== LOOP ====== }
 procedure Run(UpdateProc: TDeltaProc);
 procedure Run(UpdateProc: TDeltaProc; DrawProc: TDeltaProc);
+
+
+// push pop
+procedure Push; inline;
+procedure Pop;  inline;
+
 
 { ====== KOLORY ====== }
 { ====== Deklaracje kolorów ====== }
@@ -1599,8 +1612,7 @@ end;
 procedure DrawTextOutline(const text: String; x, y, size: Integer; const fillColor, outlineColor: TColor; outlinePx: Integer);
 begin
   gCtx.save;
-  if gCtx.font = '' then
-  gCtx.font := IntToStr(size) + 'px system-ui, sans-serif';
+  EnsureFont(size);
   gCtx.textAlign := 'left';
   gCtx.textBaseline := 'top';
 
@@ -2150,7 +2162,44 @@ end;
 
 
 // === Tekst ===
+procedure ApplyFont;
+begin
+  SetTextFont(IntToStr(GFontSize) + 'px ' + GFontFamily);
+end;
 
+
+function BuildFontString(const sizePx: Integer; const family: String = ''): String;
+begin
+  if (family <> '') then
+    Result := IntToStr(sizePx) + 'px "' + family + '", ' + GFontFamily
+  else
+    Result := IntToStr(sizePx) + 'px ' + GFontFamily;
+end;
+
+procedure EnsureFont(const sizePx: Integer; const family: String = '');
+var desired: String;
+begin
+  desired := BuildFontString(sizePx, family);
+  if gCtx.font <> desired then
+    gCtx.font := desired;
+end;
+procedure SetFontSize(const sizePx: Integer);
+begin
+  if sizePx <> GFontSize then
+  begin
+    GFontSize := sizePx;
+    ApplyFont;
+  end;
+end;
+
+procedure SetFontFamily(const family: String);
+begin
+  if family <> GFontFamily then
+  begin
+    GFontFamily := family;
+    ApplyFont;
+  end;
+end;
 // Proste rysowanie tekstu w punkcie
 procedure DrawTextSimple(const text: String; pos: TVector2; fontSize: Integer; const color: TColor);
 begin
@@ -2196,31 +2245,121 @@ begin
 end;
 
 // Tekst w ramce (word wrap)
-procedure DrawTextBoxed(const text: String; pos: TVector2; boxWidth: Integer; fontSize: Integer; const color: TColor; lineSpacing: Integer);
+// Tekst w ramce o szerokości boxWidth z łamaniem wierszy.
+// Parametry:
+//   text           – treść
+//   pos            – lewy-górny narożnik ramki (zewnętrznej)
+//   boxWidth       – szerokość ramki (px)
+//   fontSize       – rozmiar czcionki
+//   textColor      – kolor tekstu
+//   lineSpacing    – odstęp między wierszami (px, może być 0)
+//   borderColor    – kolor obrysu ramki
+//   borderThickness– grubość obrysu (px, np. 2)
+procedure DrawTextBoxed(const text: String; pos: TVector2; boxWidth: Integer;
+  fontSize: Integer; const textColor: TColor; lineSpacing: Integer;
+  const borderColor: TColor; borderThickness: Integer);
 var
   words: array of String;
-  currentLine: String;
-  i, y: Integer;
+  lines: array of String;
+  currentLine, tryLine: String;
+  i, j, y, pad, totalH, lineH: Integer;
+
+  function Fits(const s: String): Boolean;
+  begin
+    Result := Round(MeasureTextWidth(s, fontSize)) <= (boxWidth - 2*pad);
+  end;
+
+  procedure BreakLongWord(const w: String);
+  var
+    seg: String;
+  begin
+    seg := '';
+    for j := 1 to Length(w) do
+    begin
+      if not Fits(seg + w[j]) then
+      begin
+        if seg <> '' then
+        begin
+          SetLength(lines, Length(lines)+1);
+          lines[High(lines)] := seg + '-';
+          seg := w[j];
+        end
+        else
+        begin
+          SetLength(lines, Length(lines)+1);
+          lines[High(lines)] := w[j];
+          seg := '';
+        end;
+      end
+      else
+        seg := seg + w[j];
+    end;
+    if seg <> '' then
+    begin
+      SetLength(lines, Length(lines)+1);
+      lines[High(lines)] := seg;
+    end;
+  end;
+
 begin
+  if text = '' then Exit;
+
+  pad := 4;
+  lineH := Round(fontSize * 1.35) + lineSpacing;
+
   words := text.Split([' ']);
+  SetLength(lines, 0);
   currentLine := '';
-  y := Round(pos.y);
+  y := Round(pos.y) + pad;
 
   for i := 0 to High(words) do
   begin
-    if MeasureTextWidth(currentLine + words[i], fontSize) > boxWidth then
-    begin
-      DrawText(currentLine, Round(pos.x), y, fontSize, color);
-      y += fontSize + lineSpacing;
-      currentLine := words[i] + ' ';
-    end
+    if currentLine = '' then
+      tryLine := words[i]
     else
-      currentLine += words[i] + ' ';
+      tryLine := currentLine + ' ' + words[i];
+
+    if Fits(tryLine) then
+      currentLine := tryLine
+    else
+    begin
+      if currentLine <> '' then
+      begin
+        SetLength(lines, Length(lines)+1);
+        lines[High(lines)] := currentLine;
+        currentLine := '';
+      end;
+
+      if not Fits(words[i]) then
+        BreakLongWord(words[i])
+      else
+        currentLine := words[i];
+    end;
   end;
 
   if currentLine <> '' then
-    DrawText(currentLine, Round(pos.x), y, fontSize, color);
+  begin
+    SetLength(lines, Length(lines)+1);
+    lines[High(lines)] := currentLine;
+  end;
+
+  // rysowanie tekstu
+  for i := 0 to High(lines) do
+    DrawText(lines[i], Round(pos.x) + pad, y + i*lineH, fontSize, textColor);
+
+  // wysokość ramki
+  if Length(lines) > 0 then
+    totalH := Length(lines)*lineH - lineSpacing + 2*pad
+  else
+    totalH := fontSize + 2*pad;
+
+  // ramka jednym wywołaniem, z zadaną grubością
+  DrawRectangleLines(Round(pos.x), Round(pos.y),
+                     boxWidth, totalH,
+                     borderColor, borderThickness);
 end;
+
+
 
 // Tekst na okręgu
 procedure DrawTextOnCircle(const text: String; center: TVector2; radius: Double; startAngle: Double; fontSize: Integer; const color: TColor);
@@ -3270,8 +3409,7 @@ end;
 procedure DrawText(const text: String; x, y, size: Integer; const color: TColor);
 begin
   gCtx.fillStyle := ColorToCanvasRGBA(color);
-  if gCtx.font = '' then
-  gCtx.font := IntToStr(size) + 'px system-ui, sans-serif';
+  EnsureFont(size);
   gCtx.textBaseline := 'top';
   gCtx.fillText(text, x, y);
 end;
@@ -3279,8 +3417,7 @@ end;
 function MeasureTextWidth(const text: String; size: Integer): Double;
 begin
   gCtx.save;
-  if gCtx.font = '' then
-  gCtx.font := IntToStr(size) + 'px system-ui, sans-serif';
+  EnsureFont(size);
   Result := gCtx.measureText(text).width;
   gCtx.restore;
 end;
@@ -3289,8 +3426,7 @@ function MeasureTextHeight(const text: String; size: Integer): Double;
 var m: TJSObject;
 begin
   gCtx.save;
-  if gCtx.font = '' then
-  gCtx.font := IntToStr(size) + 'px system-ui, sans-serif';
+  EnsureFont(size);
   m := TJSObject(gCtx.measureText(text));
   if m.hasOwnProperty('actualBoundingBoxAscent') and m.hasOwnProperty('actualBoundingBoxDescent') then
     Result := Double(m['actualBoundingBoxAscent']) + Double(m['actualBoundingBoxDescent'])
@@ -3314,8 +3450,7 @@ procedure DrawTextCentered(const text: String; cx, cy, size: Integer; const colo
 begin
   gCtx.save;
   gCtx.fillStyle := ColorToCanvasRGBA(color);
-  if gCtx.font = '' then
-  gCtx.font := IntToStr(size) + 'px system-ui, sans-serif';
+  EnsureFont(size);
   gCtx.textAlign := 'center';
   gCtx.textBaseline := 'middle';
   gCtx.fillText(text, cx, cy);
@@ -3342,8 +3477,7 @@ begin
   gCtx.translate(x + originX, y + originY);
   gCtx.rotate(rotation);
   gCtx.fillStyle := ColorToCanvasRGBA(color);
-  if gCtx.font = '' then
-  gCtx.font := IntToStr(size) + 'px system-ui, sans-serif';
+  EnsureFont(size);
   gCtx.textAlign := 'left';
   gCtx.textBaseline := 'top';
   gCtx.fillText(text, -originX, -originY);
@@ -3357,8 +3491,7 @@ begin
   gCtx.save;
   if family <> '' then
     gCtx.font := IntToStr(size) + 'px "' + family + '", system-ui, sans-serif'
-  else if gCtx.font = '' then
-    gCtx.font := IntToStr(size) + 'px system-ui, sans-serif';
+  else EnsureFont(size);
   gCtx.fillStyle := ColorToCanvasRGBA(color);
   gCtx.textBaseline := 'top';
   gCtx.fillText(text, x, y);
@@ -3370,8 +3503,7 @@ begin
   gCtx.save;
   if family <> '' then
     gCtx.font := IntToStr(size) + 'px "' + family + '", system-ui, sans-serif'
-  else if gCtx.font = '' then
-    gCtx.font := IntToStr(size) + 'px system-ui, sans-serif';
+  else EnsureFont(size);
   Result := gCtx.measureText(text).width;
   gCtx.restore;
 end;
@@ -3382,8 +3514,7 @@ begin
   gCtx.save;
   if family <> '' then
     gCtx.font := IntToStr(size) + 'px "' + family + '", system-ui, sans-serif'
-  else if gCtx.font = '' then
-    gCtx.font := IntToStr(size) + 'px system-ui, sans-serif';
+  else EnsureFont(size);
   m := TJSObject(gCtx.measureText(text));
   if m.hasOwnProperty('actualBoundingBoxAscent') and m.hasOwnProperty('actualBoundingBoxDescent') then
     Result := Double(m['actualBoundingBoxAscent']) + Double(m['actualBoundingBoxDescent'])
@@ -4162,6 +4293,15 @@ end;
 procedure EndRectStrokeBatch;
 begin
   gCtx.stroke;
+end;
+procedure Push; inline;
+begin
+  gCtx.save;
+end;
+
+procedure Pop; inline;
+begin
+  gCtx.restore;
 end;
 
 end.
